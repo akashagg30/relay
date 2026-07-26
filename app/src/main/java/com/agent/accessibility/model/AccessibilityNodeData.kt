@@ -111,3 +111,18 @@ data class AccessibilityTreeData(
         return sb.toString()
     }
 }
+
+data class TreeSnapshot(
+    val tree: AccessibilityTreeData,
+    val capturedAt: Long = System.currentTimeMillis(),
+    val source: SnapshotSource = SnapshotSource.MANUAL
+) {
+    fun ageSeconds(): Long = (System.currentTimeMillis() - capturedAt) / 1000
+}
+
+enum class SnapshotSource {
+    MANUAL,
+    WINDOW_CHANGED,
+    CONTENT_CHANGED,
+    COUNTDOWN
+}

@@ -1,5 +1,11 @@
 package com.agent.accessibility.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.wifi.WifiManager
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,25 +21,36 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agent.accessibility.controller.AccessibilityController
-import com.agent.accessibility.model.AccessibilityTreeData
+import com.agent.accessibility.mcp.McpServerService
+import com.agent.accessibility.model.SnapshotSource
+import com.agent.accessibility.model.TreeSnapshot
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebugScreen(controller: AccessibilityController) {
     var isServiceEnabled by remember { mutableStateOf(controller.isServiceEnabled()) }
-    var treeData by remember { mutableStateOf<AccessibilityTreeData?>(null) }
-    var showDebugControls by remember { mutableStateOf(false) }
+    var latestSnapshot by remember { mutableStateOf<TreeSnapshot?>(null) }
+    var countdown by remember { mutableIntStateOf(0) }
+    var isMcpRunning by remember { mutableStateOf(McpServerService.isRunning) }
+    var mcpPort by remember { mutableIntStateOf(McpServerService.port) }
+    var authToken by remember { mutableStateOf(McpServerService.authToken) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
-    // Refresh state periodically
     LaunchedEffect(Unit) {
         while (true) {
             isServiceEnabled = controller.isServiceEnabled()
+            isMcpRunning = McpServerService.isRunning
+            mcpPort = McpServerService.port
+            authToken = McpServerService.authToken
             delay(1000)
         }
     }
@@ -41,7 +58,7 @@ fun DebugScreen(controller: AccessibilityController) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Android Agent Debug") },
+                title = { Text("Android Agent") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
@@ -60,7 +77,6 @@ fun DebugScreen(controller: AccessibilityController) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Service Status
             item {
                 ServiceStatusCard(
                     isEnabled = isServiceEnabled,
@@ -68,33 +84,77 @@ fun DebugScreen(controller: AccessibilityController) {
                 )
             }
 
-            // Refresh Tree Button
+            item {
+                McpServerCard(
+                    isRunning = isMcpRunning,
+                    port = mcpPort,
+                    authToken = authToken,
+                    isAccessibilityEnabled = isServiceEnabled,
+                    onStart = {
+                        val intent = Intent(context, McpServerService::class.java).apply {
+                            action = "START"
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            context.startForegroundService(intent)
+                        } else {
+                            context.startService(intent)
+                        }
+                    },
+                    onStop = {
+                        val intent = Intent(context, McpServerService::class.java).apply {
+                            action = "STOP"
+                        }
+                        context.startService(intent)
+                    },
+                    onCopyToken = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("auth_token", authToken))
+                    },
+                    onCopyEndpoint = {
+                        val ip = getDeviceIp(context)
+                        val endpoint = "http://$ip:$mcpPort/mcp"
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("mcp_endpoint", endpoint))
+                    }
+                )
+            }
+
             if (isServiceEnabled) {
                 item {
-                    Button(
-                        onClick = {
-                            treeData = controller.getService()?.readCurrentTree()
+                    CaptureControlsCard(
+                        controller = controller,
+                        countdown = countdown,
+                        onCaptureNow = {
+                            scope.launch {
+                                latestSnapshot = controller.captureSnapshot()
+                            }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("REFRESH TREE")
-                    }
+                        onCountdownCapture = { seconds ->
+                            countdown = seconds
+                            scope.launch {
+                                for (i in seconds downTo 1) {
+                                    countdown = i
+                                    delay(1000)
+                                }
+                                countdown = 0
+                                latestSnapshot = controller.captureSnapshot(SnapshotSource.COUNTDOWN)
+                            }
+                        },
+                        onClearSnapshots = {
+                            controller.clearSnapshots()
+                            latestSnapshot = null
+                        },
+                        snapshotCount = controller.getSnapshotCount()
+                    )
                 }
             }
 
-            // Tree Display
-            if (treeData != null) {
+            if (latestSnapshot != null) {
                 item {
-                    TreeDisplayCard(treeData = treeData!!)
+                    TreeDisplayCard(snapshot = latestSnapshot!!)
                 }
             }
 
-            // Debug Controls
             if (isServiceEnabled) {
                 item {
                     DebugControlsCard(controller = controller)
@@ -102,6 +162,18 @@ fun DebugScreen(controller: AccessibilityController) {
             }
         }
     }
+}
+
+private fun getDeviceIp(context: Context): String {
+    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    val ip = wifiManager.connectionInfo.ipAddress
+    return String.format(
+        "%d.%d.%d.%d",
+        ip and 0xff,
+        ip shr 8 and 0xff,
+        ip shr 16 and 0xff,
+        ip shr 24 and 0xff
+    )
 }
 
 @Composable
@@ -146,7 +218,210 @@ fun ServiceStatusCard(isEnabled: Boolean, onOpenSettings: () -> Unit) {
 }
 
 @Composable
-fun TreeDisplayCard(treeData: AccessibilityTreeData) {
+fun McpServerCard(
+    isRunning: Boolean,
+    port: Int,
+    authToken: String,
+    isAccessibilityEnabled: Boolean,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onCopyToken: () -> Unit,
+    onCopyEndpoint: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isRunning) Color(0xFF2196F3).copy(alpha = 0.1f) else Color(0xFF9E9E9E).copy(alpha = 0.1f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "MCP Server",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = "Status: ${if (isRunning) "RUNNING" else "STOPPED"}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (isRunning) Color(0xFF4CAF50) else Color(0xFFF44336)
+            )
+
+            if (isRunning) {
+                Text(
+                    text = "Port: $port",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = "Endpoint: http://<phone-ip>:$port/mcp",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onCopyEndpoint,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("COPY ENDPOINT", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Auth Token:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = authToken,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 2
+                )
+                Button(
+                    onClick = onCopyToken,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Text("COPY TOKEN")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isRunning) {
+                Button(
+                    onClick = onStop,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))
+                ) {
+                    Text("STOP SERVER")
+                }
+            } else {
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = isAccessibilityEnabled,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                ) {
+                    Text("START SERVER")
+                }
+                if (!isAccessibilityEnabled) {
+                    Text(
+                        text = "Enable Accessibility Service first",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFF44336)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CaptureControlsCard(
+    controller: AccessibilityController,
+    countdown: Int,
+    onCaptureNow: () -> Unit,
+    onCountdownCapture: (Int) -> Unit,
+    onClearSnapshots: () -> Unit,
+    snapshotCount: Int
+) {
+    var countdownSeconds by remember { mutableStateOf("3") }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Capture Controls",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = "Snapshots stored: $snapshotCount",
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            if (countdown > 0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFF9800).copy(alpha = 0.2f))
+                ) {
+                    Text(
+                        text = "Capturing in $countdown seconds... Switch to another app NOW!",
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE65100)
+                    )
+                }
+            }
+
+            Button(
+                onClick = onCaptureNow,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("CAPTURE NOW")
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = countdownSeconds,
+                    onValueChange = { countdownSeconds = it },
+                    label = { Text("Seconds") },
+                    modifier = Modifier.width(80.dp)
+                )
+                Button(
+                    onClick = {
+                        val seconds = countdownSeconds.toIntOrNull() ?: 3
+                        onCountdownCapture(seconds)
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+                ) {
+                    Text("CAPTURE IN ${countdownSeconds}s")
+                }
+            }
+
+            OutlinedButton(
+                onClick = onClearSnapshots,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("CLEAR SNAPSHOTS")
+            }
+        }
+    }
+}
+
+@Composable
+fun TreeDisplayCard(snapshot: TreeSnapshot) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
@@ -155,17 +430,25 @@ fun TreeDisplayCard(treeData: AccessibilityTreeData) {
             modifier = Modifier.padding(16.dp)
         ) {
             Text(
-                text = "Accessibility Tree",
+                text = "Captured Tree",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Foreground: ${treeData.foregroundPackage ?: "Unknown"}",
+                text = "Package: ${snapshot.tree.foregroundPackage ?: "Unknown"}",
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = "Total Nodes: ${treeData.totalNodeCount}",
+                text = "Nodes: ${snapshot.tree.totalNodeCount}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "Source: ${snapshot.source}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "Age: ${snapshot.ageSeconds()}s ago",
                 style = MaterialTheme.typography.bodyMedium
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -177,7 +460,7 @@ fun TreeDisplayCard(treeData: AccessibilityTreeData) {
                     .padding(8.dp)
             ) {
                 Text(
-                    text = treeData.toPrettyString(),
+                    text = snapshot.tree.toPrettyString(),
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp
@@ -215,12 +498,11 @@ fun DebugControlsCard(controller: AccessibilityController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Debug Controls",
+                text = "Interaction Controls",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
-            // Click Node
             OutlinedTextField(
                 value = nodeIdText,
                 onValueChange = { nodeIdText = it },
@@ -243,7 +525,6 @@ fun DebugControlsCard(controller: AccessibilityController) {
 
             HorizontalDivider()
 
-            // Tap
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -278,7 +559,6 @@ fun DebugControlsCard(controller: AccessibilityController) {
 
             HorizontalDivider()
 
-            // Swipe
             Text("Swipe", style = MaterialTheme.typography.titleMedium)
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -340,7 +620,6 @@ fun DebugControlsCard(controller: AccessibilityController) {
 
             HorizontalDivider()
 
-            // Input Text
             OutlinedTextField(
                 value = inputNodeId,
                 onValueChange = { inputNodeId = it },
@@ -369,7 +648,6 @@ fun DebugControlsCard(controller: AccessibilityController) {
 
             HorizontalDivider()
 
-            // Back / Home
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -388,7 +666,6 @@ fun DebugControlsCard(controller: AccessibilityController) {
                 }
             }
 
-            // Result Display
             if (lastResult != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),

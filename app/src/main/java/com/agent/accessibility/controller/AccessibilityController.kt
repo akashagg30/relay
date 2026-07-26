@@ -8,6 +8,8 @@ import android.graphics.Path
 import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityNodeInfo
+import com.agent.accessibility.model.SnapshotSource
+import com.agent.accessibility.model.TreeSnapshot
 import com.agent.accessibility.service.AgentAccessibilityService
 
 class AccessibilityController(private val context: Context) {
@@ -110,6 +112,22 @@ class AccessibilityController(private val context: Context) {
 
         rootNode.recycle()
         return false
+    }
+
+    fun captureSnapshot(source: SnapshotSource = SnapshotSource.MANUAL): TreeSnapshot? {
+        return getService()?.captureSnapshot(source)
+    }
+
+    fun getSnapshotCount(): Int {
+        return getService()?.snapshots?.size ?: 0
+    }
+
+    fun clearSnapshots() {
+        getService()?.clearSnapshots()
+    }
+
+    fun getLatestExternalSnapshot(): TreeSnapshot? {
+        return getService()?.getLatestExternalSnapshot()
     }
 
     private fun findNodeById(node: AccessibilityNodeInfo, targetId: Int, currentId: Int = 0): AccessibilityNodeInfo? {

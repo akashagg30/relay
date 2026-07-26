@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "android-agent": {
+      "type": "remote",
+      "url": "http://192.168.1.7:8765/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer 11223344"
+      }
+    }
+  }
+}

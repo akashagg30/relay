@@ -28,8 +28,15 @@ class McpHandler(private val context: Context) {
         return try {
             val request = JSONObject(body)
             val method = request.optString("method", "")
+            val hasId = request.has("id")
             val id = request.optString("id", "")
             val params = request.optJSONObject("params") ?: JSONObject()
+
+            // Notifications (no id) should not get a response
+            if (!hasId) {
+                Log.d(TAG, "Notification: $method")
+                return ""
+            }
 
             when (method) {
                 "initialize" -> handleInitialize(id)

@@ -190,6 +190,13 @@ class McpServerService : Service() {
 
         Log.d(TAG, "MCP request: ${body.take(200)}")
         val response = mcpHandler.handleRequest(body)
+
+        // Empty response means it was a notification
+        if (response.isEmpty()) {
+            Log.d(TAG, "Notification handled (no response)")
+            return 204 to ""
+        }
+
         Log.d(TAG, "MCP response: ${response.take(200)}")
         return 200 to response
     }
@@ -206,6 +213,8 @@ class McpServerService : Service() {
         val bytes = body.toByteArray(Charsets.UTF_8)
         val statusText = when (statusCode) {
             200 -> "OK"
+            202 -> "Accepted"
+            204 -> "No Content"
             401 -> "Unauthorized"
             404 -> "Not Found"
             405 -> "Method Not Allowed"
@@ -213,7 +222,9 @@ class McpServerService : Service() {
         }
         val header = buildString {
             append("HTTP/1.1 $statusCode $statusText\r\n")
-            append("Content-Type: application/json\r\n")
+            if (statusCode != 204) {
+                append("Content-Type: application/json\r\n")
+            }
             append("Content-Length: ${bytes.size}\r\n")
             append("Access-Control-Allow-Origin: *\r\n")
             append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
@@ -222,7 +233,9 @@ class McpServerService : Service() {
             append("\r\n")
         }
         output.write(header.toByteArray())
-        output.write(bytes)
+        if (statusCode != 204) {
+            output.write(bytes)
+        }
         output.flush()
     }
 

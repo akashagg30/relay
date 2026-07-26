@@ -37,14 +37,9 @@ object AccessibilityTreeReader {
         val nodeId = nodeIdCounter++
 
         val bounds = RectData(0, 0, 0, 0)
-        val boundsArray = IntArray(2)
         try {
-            node.getBoundsInScreen(boundsArray)
-            val rect = android.graphics.Rect(
-                boundsArray[0], boundsArray[1],
-                boundsArray[0] + node.width,
-                boundsArray[1] + node.height
-            )
+            val rect = android.graphics.Rect()
+            node.getBoundsInScreen(rect)
             val boundsResult = RectData.fromRect(rect)
 
             val children = mutableListOf<AccessibilityNodeData>()

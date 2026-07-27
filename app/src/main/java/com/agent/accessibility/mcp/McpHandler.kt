@@ -39,7 +39,7 @@ class McpHandler(private val context: Context) {
             }
 
             when (method) {
-                "initialize" -> handleInitialize(id)
+                "initialize" -> handleInitialize(id, params)
                 "tools/list" -> handleToolsList(id)
                 "tools/call" -> handleToolsCall(id, params)
                 else -> errorResponse(id, "Method not found: $method")
@@ -50,9 +50,12 @@ class McpHandler(private val context: Context) {
         }
     }
 
-    private fun handleInitialize(id: String): String {
+    private fun handleInitialize(id: String, params: JSONObject = JSONObject()): String {
+        // Accept client's protocol version if provided, otherwise use our version
+        val clientVersion = params.optString("protocolVersion", "2024-11-05")
+        
         val result = JSONObject().apply {
-            put("protocolVersion", "2024-11-05")
+            put("protocolVersion", clientVersion)
             put("capabilities", JSONObject().apply {
                 put("tools", JSONObject())
             })
@@ -121,10 +124,11 @@ class McpHandler(private val context: Context) {
 
     private fun getScreenState(id: String): String {
         val service = AgentAccessibilityService.instance
-            ?: return errorResponse(id, "Accessibility service not running")
+            ?: return toolErrorResponse(id, "Accessibility service not running")
 
-        val rootNode = service.rootInActiveWindow
-            ?: return errorResponse(id, "No active window")
+        // Try to find the foreground app window, not our own
+        val rootNode = findForegroundRoot(service)
+            ?: return toolErrorResponse(id, "No active window")
 
         val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
         NodeResolver.updateFromTree(tree)
@@ -145,7 +149,28 @@ class McpHandler(private val context: Context) {
             put("nodes", nodesArray)
         }
 
-        return successResponse(id, result)
+        return toolSuccessResponse(id, result.toString())
+    }
+
+    private fun findForegroundRoot(service: AgentAccessibilityService): AccessibilityNodeInfo? {
+        val root = service.rootInActiveWindow
+        
+        // If root is NOT our package, use it directly
+        if (root != null && root.packageName?.toString() != context.packageName) {
+            return root
+        }
+        
+        // Root is our package (app is in foreground) - try to find another window
+        for (window in service.windows) {
+            val windowRoot = window.root
+            if (windowRoot != null && windowRoot.packageName?.toString() != context.packageName) {
+                return windowRoot
+            }
+        }
+        
+        // No other window found - return root anyway (our own window)
+        // The caller can check foregroundPackage and handle it
+        return root
     }
 
     private fun flattenForJson(
@@ -193,24 +218,24 @@ class McpHandler(private val context: Context) {
 
     private fun clickNode(id: String, args: JSONObject): String {
         val nodeId = args.optInt("nodeId", -1)
-        if (nodeId < 0) return errorResponse(id, "Invalid nodeId")
+        if (nodeId < 0) return toolErrorResponse(id, "Invalid nodeId")
 
         val service = AgentAccessibilityService.instance
-            ?: return errorResponse(id, "Accessibility service not running")
+            ?: return toolErrorResponse(id, "Accessibility service not running")
 
         val rootNode = service.rootInActiveWindow
-            ?: return errorResponse(id, "No active window")
+            ?: return toolErrorResponse(id, "No active window")
 
         val node = NodeResolver.resolveNode(rootNode, nodeId)
-            ?: return errorResponse(id, "stale_node: could not resolve node $nodeId against current hierarchy")
+            ?: return toolErrorResponse(id, "stale_node: could not resolve node $nodeId against current hierarchy")
 
         val clickResult = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         if (clickResult) {
             Log.d(TAG, "Clicked node $nodeId directly")
-            return successResponse(id, JSONObject().apply {
+            return toolSuccessResponse(id, JSONObject().apply {
                 put("success", true)
                 put("method", "ACTION_CLICK")
-            })
+            }.toString())
         }
 
         val ancestor = NodeResolver.findClickableAncestor(node)
@@ -218,22 +243,22 @@ class McpHandler(private val context: Context) {
             val ancestorResult = ancestor.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             ancestor.recycle()
             Log.d(TAG, "Clicked ancestor of node $nodeId")
-            return successResponse(id, JSONObject().apply {
+            return toolSuccessResponse(id, JSONObject().apply {
                 put("success", ancestorResult)
                 put("method", "ACTION_CLICK_ANCESTOR")
-            })
+            }.toString())
         }
 
-        return errorResponse(id, "Node $nodeId is not clickable and no clickable ancestor found")
+        return toolErrorResponse(id, "Node $nodeId is not clickable and no clickable ancestor found")
     }
 
     private fun tap(id: String, args: JSONObject): String {
         val x = args.optInt("x", -1)
         val y = args.optInt("y", -1)
-        if (x < 0 || y < 0) return errorResponse(id, "Invalid coordinates")
+        if (x < 0 || y < 0) return toolErrorResponse(id, "Invalid coordinates")
 
         val service = AgentAccessibilityService.instance
-            ?: return errorResponse(id, "Accessibility service not running")
+            ?: return toolErrorResponse(id, "Accessibility service not running")
 
         val path = Path()
         path.moveTo(x.toFloat(), y.toFloat())
@@ -243,7 +268,7 @@ class McpHandler(private val context: Context) {
 
         val result = service.dispatchGesture(gestureBuilder.build(), null, null)
         Log.d(TAG, "Tap at ($x, $y): $result")
-        return successResponse(id, JSONObject().apply { put("success", result) })
+        return toolSuccessResponse(id, JSONObject().apply { put("success", result) }.toString())
     }
 
     private fun swipe(id: String, args: JSONObject): String {
@@ -254,11 +279,11 @@ class McpHandler(private val context: Context) {
         val durationMs = args.optLong("durationMs", 500)
 
         if (startX < 0 || startY < 0 || endX < 0 || endY < 0) {
-            return errorResponse(id, "Invalid coordinates")
+            return toolErrorResponse(id, "Invalid coordinates")
         }
 
         val service = AgentAccessibilityService.instance
-            ?: return errorResponse(id, "Accessibility service not running")
+            ?: return toolErrorResponse(id, "Accessibility service not running")
 
         val path = Path()
         path.moveTo(startX.toFloat(), startY.toFloat())
@@ -269,28 +294,28 @@ class McpHandler(private val context: Context) {
 
         val result = service.dispatchGesture(gestureBuilder.build(), null, null)
         Log.d(TAG, "Swipe ($startX,$startY) -> ($endX,$endY): $result")
-        return successResponse(id, JSONObject().apply { put("success", result) })
+        return toolSuccessResponse(id, JSONObject().apply { put("success", result) }.toString())
     }
 
     private fun inputText(id: String, args: JSONObject): String {
         val nodeId = args.optInt("nodeId", -1)
         val text = args.optString("text", "")
-        if (nodeId < 0) return errorResponse(id, "Invalid nodeId")
-        if (text.isEmpty()) return errorResponse(id, "Empty text")
+        if (nodeId < 0) return toolErrorResponse(id, "Invalid nodeId")
+        if (text.isEmpty()) return toolErrorResponse(id, "Empty text")
 
         val service = AgentAccessibilityService.instance
-            ?: return errorResponse(id, "Accessibility service not running")
+            ?: return toolErrorResponse(id, "Accessibility service not running")
 
         val rootNode = service.rootInActiveWindow
-            ?: return errorResponse(id, "No active window")
+            ?: return toolErrorResponse(id, "No active window")
 
         val node = NodeResolver.resolveNode(rootNode, nodeId)
-            ?: return errorResponse(id, "stale_node: could not resolve node $nodeId")
+            ?: return toolErrorResponse(id, "stale_node: could not resolve node $nodeId")
 
         if (!node.isEditable) {
             node.recycle()
             rootNode.recycle()
-            return errorResponse(id, "Node $nodeId is not editable")
+            return toolErrorResponse(id, "Node $nodeId is not editable")
         }
 
         val bundle = Bundle()
@@ -300,58 +325,58 @@ class McpHandler(private val context: Context) {
         rootNode.recycle()
 
         Log.d(TAG, "Input text to node $nodeId: $result")
-        return successResponse(id, JSONObject().apply { put("success", result) })
+        return toolSuccessResponse(id, JSONObject().apply { put("success", result) }.toString())
     }
 
     private fun back(id: String): String {
         val service = AgentAccessibilityService.instance
-            ?: return errorResponse(id, "Accessibility service not running")
+            ?: return toolErrorResponse(id, "Accessibility service not running")
 
         val result = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
         Log.d(TAG, "Back: $result")
-        return successResponse(id, JSONObject().apply { put("success", result) })
+        return toolSuccessResponse(id, JSONObject().apply { put("success", result) }.toString())
     }
 
     private fun home(id: String): String {
         val service = AgentAccessibilityService.instance
-            ?: return errorResponse(id, "Accessibility service not running")
+            ?: return toolErrorResponse(id, "Accessibility service not running")
 
         val result = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
         Log.d(TAG, "Home: $result")
-        return successResponse(id, JSONObject().apply { put("success", result) })
+        return toolSuccessResponse(id, JSONObject().apply { put("success", result) }.toString())
     }
 
     private fun launchApp(id: String, args: JSONObject): String {
         val packageName = args.optString("packageName", "")
-        if (packageName.isEmpty()) return errorResponse(id, "Empty packageName")
+        if (packageName.isEmpty()) return toolErrorResponse(id, "Empty packageName")
 
         val pm = context.packageManager
         val intent = pm.getLaunchIntentForPackage(packageName)
         if (intent == null) {
-            return errorResponse(id, "Cannot launch $packageName: package not found or has no launch intent")
+            return toolErrorResponse(id, "Cannot launch $packageName: package not found or has no launch intent")
         }
 
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(intent)
             Log.d(TAG, "Launched $packageName")
-            return successResponse(id, JSONObject().apply {
+            return toolSuccessResponse(id, JSONObject().apply {
                 put("success", true)
                 put("packageName", packageName)
-            })
+            }.toString())
         } catch (e: Exception) {
             Log.e(TAG, "Launch failed for $packageName", e)
-            return errorResponse(id, "Launch failed: ${e.message}")
+            return toolErrorResponse(id, "Launch failed: ${e.message}")
         }
     }
 
     private fun wait(id: String, args: JSONObject): String {
         val ms = args.optLong("milliseconds", 1000).coerceIn(0, MAX_WAIT_MS)
         Thread.sleep(ms)
-        return successResponse(id, JSONObject().apply {
+        return toolSuccessResponse(id, JSONObject().apply {
             put("success", true)
             put("waitedMs", ms)
-        })
+        }.toString())
     }
 
     private fun toolDef(name: String, description: String, inputSchema: JSONObject): JSONObject {
@@ -380,6 +405,39 @@ class McpHandler(private val context: Context) {
     }
 
     private fun successResponse(id: String, result: JSONObject): String {
+        return JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", id)
+            put("result", result)
+        }.toString()
+    }
+
+    private fun toolSuccessResponse(id: String, textContent: String): String {
+        val result = JSONObject().apply {
+            put("content", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", textContent)
+                })
+            })
+        }
+        return JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", id)
+            put("result", result)
+        }.toString()
+    }
+
+    private fun toolErrorResponse(id: String, message: String): String {
+        val result = JSONObject().apply {
+            put("content", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", message)
+                })
+            })
+            put("isError", true)
+        }
         return JSONObject().apply {
             put("jsonrpc", "2.0")
             put("id", id)

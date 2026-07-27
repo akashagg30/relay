@@ -118,6 +118,7 @@ class McpServerService : Service() {
     }
 
     private fun handleClient(socket: Socket) {
+        var keepAlive = false
         try {
             val input = BufferedReader(InputStreamReader(socket.getInputStream()))
             val output = socket.getOutputStream()
@@ -143,6 +144,8 @@ class McpServerService : Service() {
                 }
             }
 
+            Log.d(TAG, "Request: $method $path Headers: ${headers.filter { it.key == "accept" || it.key == "content-type" }}")
+
             val body = if (contentLength > 0) {
                 val chars = CharArray(contentLength)
                 var read = 0
@@ -154,22 +157,37 @@ class McpServerService : Service() {
                 String(chars, 0, read)
             } else ""
 
+            val accept = headers["accept"] ?: ""
             val response = when {
                 method == "GET" && path == "/health" -> handleHealth()
-                method == "POST" && path == "/mcp" -> handleMcp(headers["authorization"], body)
+                method == "GET" && path == "/mcp" -> handleSseGet()
+                method == "POST" && path == "/mcp" -> handleMcp(headers["authorization"], body, accept)
                 method == "OPTIONS" -> corsResponse()
                 else -> notFound()
             }
 
-            sendHttpResponse(output, response.first, response.second)
+            if (response.third) {
+                // SSE response
+                val eventType = if (method == "GET") "endpoint" else "message"
+                sendSseResponse(output, response.second, eventType)
+                // For POST SSE: close stream after response (client expects it)
+                // For GET SSE: keep alive (legacy transport)
+                if (method != "GET") {
+                    keepAlive = false
+                }
+            } else {
+                sendHttpResponse(output, response.first, response.second)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Client handler error", e)
         } finally {
-            try { socket.close() } catch (_: Exception) {}
+            try {
+                if (!keepAlive) socket.close()
+            } catch (_: Exception) {}
         }
     }
 
-    private fun handleHealth(): Pair<Int, String> {
+    private fun handleHealth(): Triple<Int, String, Boolean> {
         val accessibilityEnabled = isAccessibilityEnabled()
         val foregroundPackage = getForegroundPackage()
 
@@ -180,12 +198,18 @@ class McpServerService : Service() {
             put("mcpServer", isRunning)
             put("port", port)
         }
-        return 200 to health.toString()
+        return Triple(200, health.toString(), false)
     }
 
-    private fun handleMcp(authHeader: String?, body: String): Pair<Int, String> {
+    private fun handleSseGet(): Triple<Int, String, Boolean> {
+        // Legacy HTTP+SSE transport: return SSE stream with endpoint event
+        // sendSseResponse will wrap in SSE format, so return raw JSON
+        return Triple(200, """{"uri":"/mcp"}""", true)
+    }
+
+    private fun handleMcp(authHeader: String?, body: String, accept: String = ""): Triple<Int, String, Boolean> {
         if (!authManager.validate(authHeader)) {
-            return 401 to """{"error":"Unauthorized"}"""
+            return Triple(401, """{"error":"Unauthorized"}""", false)
         }
 
         Log.d(TAG, "MCP request: ${body.take(200)}")
@@ -194,19 +218,23 @@ class McpServerService : Service() {
         // Empty response means it was a notification
         if (response.isEmpty()) {
             Log.d(TAG, "Notification handled (no response)")
-            return 204 to ""
+            return Triple(204, "", false)
         }
 
         Log.d(TAG, "MCP response: ${response.take(200)}")
-        return 200 to response
+        
+        // Always use SSE format for POST - OpenCode's fetch() expects it
+        // when Accept includes text/event-stream
+        val useSse = accept.contains("text/event-stream")
+        return Triple(200, response, useSse)
     }
 
-    private fun corsResponse(): Pair<Int, String> {
-        return 200 to ""
+    private fun corsResponse(): Triple<Int, String, Boolean> {
+        return Triple(200, "", false)
     }
 
-    private fun notFound(): Pair<Int, String> {
-        return 404 to """{"error":"Not found"}"""
+    private fun notFound(): Triple<Int, String, Boolean> {
+        return Triple(404, """{"error":"Not found"}""", false)
     }
 
     private fun sendHttpResponse(output: OutputStream, statusCode: Int, body: String) {
@@ -236,6 +264,25 @@ class McpServerService : Service() {
         if (statusCode != 204) {
             output.write(bytes)
         }
+        output.flush()
+    }
+
+    private fun sendSseResponse(output: OutputStream, body: String, eventType: String = "message") {
+        val sseData = "event: $eventType\r\ndata: $body\r\n\r\n"
+        val bytes = sseData.toByteArray(Charsets.UTF_8)
+        val header = buildString {
+            append("HTTP/1.1 200 OK\r\n")
+            append("Content-Type: text/event-stream\r\n")
+            append("Cache-Control: no-cache\r\n")
+            append("X-Accel-Buffering: no\r\n")
+            append("Connection: keep-alive\r\n")
+            append("Access-Control-Allow-Origin: *\r\n")
+            append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
+            append("Access-Control-Allow-Headers: Content-Type, Authorization, Accept\r\n")
+            append("\r\n")
+        }
+        output.write(header.toByteArray())
+        output.write(bytes)
         output.flush()
     }
 

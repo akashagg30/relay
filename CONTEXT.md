@@ -14,10 +14,10 @@ AI Agent / MCP Client
   McpServerService (:8765)
         |
         v
-  McpHandler (tool dispatch)
+  McpHandler (tool dispatch, 14 tools)
         |
         v
-  NodeResolver (stale-node matching)
+  NodeResolver (fresh traversal per action)
         |
         v
   AgentAccessibilityService (Android AccessibilityService)
@@ -28,7 +28,7 @@ AI Agent / MCP Client
 
 ## Current Phase
 
-Phase 2 — MCP server implemented. No screenshots, no OCR, no autonomous planning.
+Phase 2 — MCP server fully operational. All tools verified on Xiaomi MIUI and Motorola.
 
 ## Tech Stack
 
@@ -44,29 +44,37 @@ Phase 2 — MCP server implemented. No screenshots, no OCR, no autonomous planni
 | File | Purpose |
 |------|---------|
 | `app/src/main/java/com/agent/accessibility/mcp/McpServerService.kt` | Foreground service, HTTP server on port 8765 |
-| `app/src/main/java/com/agent/accessibility/mcp/McpHandler.kt` | JSON-RPC tool dispatch, 9 tools |
-| `app/src/main/java/com/agent/accessibility/mcp/NodeResolver.kt` | Resolves node IDs against current hierarchy |
+| `app/src/main/java/com/agent/accessibility/mcp/McpHandler.kt` | JSON-RPC tool dispatch, 14 tools |
+| `app/src/main/java/com/agent/accessibility/mcp/NodeResolver.kt` | Fresh traversal resolution, snapshot manager, scoring |
 | `app/src/main/java/com/agent/accessibility/mcp/AuthManager.kt` | Token auth (dev token: `11223344`) |
+| `app/src/main/java/com/agent/accessibility/mcp/AppRegistry.kt` | App discovery (list, search, open, current) |
+| `app/src/main/java/com/agent/accessibility/mcp/SemanticProjector.kt` | Raw tree → semantic scene for observe() |
+| `app/src/main/java/com/agent/accessibility/mcp/SemanticScene.kt` | Semantic data model (roles, elements, sections) |
 | `app/src/main/java/com/agent/accessibility/service/AgentAccessibilityService.kt` | AccessibilityService, captures trees |
 | `app/src/main/java/com/agent/accessibility/service/AccessibilityTreeReader.kt` | Reads AccessibilityNodeInfo into models |
 | `app/src/main/java/com/agent/accessibility/model/AccessibilityNodeData.kt` | Data models: nodes, trees, snapshots |
 | `app/src/main/java/com/agent/accessibility/controller/AccessibilityController.kt` | UI-facing controller (click, tap, swipe, etc.) |
 | `app/src/main/java/com/agent/accessibility/ui/DebugScreen.kt` | Compose debug UI with all controls |
-| `app/src/main/AndroidManifest.xml` | Permissions, service declarations |
+| `app/src/main/AndroidManifest.xml` | Permissions, service declarations, `<queries>` |
 
-## MCP Tools
+## MCP Tools (14)
 
 | Tool | Input | Description |
 |------|-------|-------------|
 | `get_screen_state` | — | Current foreground accessibility tree as JSON |
-| `click_node` | `nodeId` | Click node, walks to clickable ancestor |
+| `observe` | — | Semantic scene (roles, sections, elements) — use instead of get_screen_state |
+| `click_node` | `elementId` | Click element, fresh traversal + clickable ancestor walk |
 | `tap` | `x`, `y` | Gesture tap at coordinates |
 | `swipe` | `startX`, `startY`, `endX`, `endY`, `durationMs` | Gesture swipe |
-| `input_text` | `nodeId`, `text` | ACTION_SET_TEXT on editable node |
+| `input_text` | `elementId`, `text` | ACTION_SET_TEXT on editable element |
 | `back` | — | GLOBAL_ACTION_BACK |
 | `home` | — | GLOBAL_ACTION_HOME |
 | `launch_app` | `packageName` | Launch app via package manager |
 | `wait` | `milliseconds` | Wait (max 10s) |
+| `list_apps` | — | Returns launchable applications |
+| `search_apps` | `query` | Search installed apps by name |
+| `open_app` | `name` | Open app by human-readable name |
+| `current_app` | — | Returns currently foreground app |
 
 ## MCP Protocol
 
@@ -81,24 +89,41 @@ Phase 2 — MCP server implemented. No screenshots, no OCR, no autonomous planni
 **Development:** `11223344` (hardcoded in `AuthManager.kt`)
 **Production:** Will revert to random 32-byte token stored in SharedPreferences.
 
-## Node Resolution Strategy
+## Node Resolution Strategy (Sealed Node Fix)
 
-1. `get_screen_state` captures tree, stores descriptors (viewId, text, class, bounds) per node
-2. `click_node(id)` resolves descriptor against **current** `rootInActiveWindow`
-3. If screen changed → returns `stale_node` error, agent must re-fetch
-4. Descriptors match by: viewIdResourceName first, then text+class, then contentDescription+class
+**Architecture**: Fresh traversal per action. No `AccessibilityNodeInfo` survives beyond the traversal that acquired it.
+
+1. `get_screen_state` captures tree, stores **descriptors** (viewId, text, class, bounds) — NOT live nodes
+2. `click_node(elementId)` calls `resolveFresh()`:
+   - Acquires fresh `rootInActiveWindow`
+   - Traverses tree, collects ALL nodes in a list (no recycling during traversal)
+   - Finds best match by descriptor scoring
+   - Recycles all non-matched nodes
+   - Returns `FreshTraversalResult` with sealed nodes
+3. Performs `performAction()` on the live node — **no IllegalStateException**
+4. `recycleAll()` in `finally` block — every node recycled exactly once
+
+**Element ID format**: `snapshotId:nodeId` (e.g., `"24:86"`)
+
+**Descriptor scoring**: viewId match (+50), text match (+40), contentDescription match (+40), className match (+5). Minimum score > 5 to match.
 
 ## How the Agent Uses This
 
 ```
 loop:
-  state = call get_screen_state
+  state = call observe()         # or get_screen_state
   agent reasons about state
   agent picks action (click_node, tap, input_text, etc.)
   agent calls action
   wait 1-2 seconds
   repeat
 ```
+
+## Testing
+
+- **105 unit tests** in `app/src/test/` (NodeResolverTest, AppRegistryTest, SemanticProjectorTest)
+- All tests passing, pre-commit lint clean
+- Verified on: Xiaomi MIUI 14.0.5, Motorola
 
 ## Building
 
@@ -115,7 +140,7 @@ cd ~/akash/android-agent
 ```bash
 adb install app/build/outputs/apk/debug/app-debug.apk
 # Or wireless:
-adb -s <PHONE_IP>:5555 install app/build/outputs/apk/debug/app-debug.apk
+adb -s <PHONE_IP>:41959 install app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## What NOT To Change
@@ -124,6 +149,7 @@ adb -s <PHONE_IP>:5555 install app/build/outputs/apk/debug/app-debug.apk
 - `AccessibilityTreeReader` — works, tested with real apps
 - Node ID assignment — sequential, stable within one `get_screen_state` call
 - Foreground service notification — required by Android for background HTTP
+- `resolveFresh()` lifecycle — must recycle all non-matched nodes, use `finally` for cleanup
 
 ## What's NOT Implemented Yet
 

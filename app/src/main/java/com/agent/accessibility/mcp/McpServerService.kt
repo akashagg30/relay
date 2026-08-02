@@ -96,6 +96,7 @@ class McpServerService : Service() {
             }
 
             isRunning = true
+            mcpHandler.init()
             startForegroundWithNotification()
             Log.d(TAG, "MCP Server started on port $port")
         } catch (e: Exception) {
@@ -112,6 +113,7 @@ class McpServerService : Service() {
             serverSocket?.close()
         } catch (_: Exception) {}
         serverSocket = null
+        mcpHandler.destroy()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "MCP Server stopped")

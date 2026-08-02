@@ -19,6 +19,7 @@ data class AccessibilityNodeData(
     val enabled: Boolean,
     val selected: Boolean,
     val checked: Boolean,
+    val visibleToUser: Boolean,
     val childCount: Int,
     val children: List<AccessibilityNodeData>
 ) {
@@ -49,6 +50,7 @@ data class AccessibilityNodeData(
         if (!enabled) flags.add("disabled")
         if (selected) flags.add("selected")
         if (checked) flags.add("checked")
+        if (!visibleToUser) flags.add("offscreen")
 
         if (flags.isNotEmpty()) {
             sb.appendLine("$prefix    flags=[${flags.joinToString(", ")}]")

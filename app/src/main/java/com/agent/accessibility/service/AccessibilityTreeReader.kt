@@ -33,8 +33,10 @@ object AccessibilityTreeReader {
         )
     }
 
+    @Suppress("DEPRECATION")
     private fun convertNode(node: AccessibilityNodeInfo): AccessibilityNodeData {
         val nodeId = nodeIdCounter++
+        val isVisible = node.isVisibleToUser
 
         val bounds = RectData(0, 0, 0, 0)
         try {
@@ -68,6 +70,7 @@ object AccessibilityTreeReader {
                 enabled = node.isEnabled,
                 selected = node.isSelected,
                 checked = node.isChecked,
+                visibleToUser = isVisible,
                 childCount = node.childCount,
                 children = children
             )
@@ -89,6 +92,7 @@ object AccessibilityTreeReader {
                 enabled = node.isEnabled,
                 selected = node.isSelected,
                 checked = node.isChecked,
+                visibleToUser = isVisible,
                 childCount = node.childCount,
                 children = emptyList()
             )

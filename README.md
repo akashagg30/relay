@@ -1,6 +1,6 @@
-# Android Agent — MCP Server
+# Relay — MCP Server for Android
 
-An Android AccessibilityService that exposes phone inspection and control as MCP tools for external AI agents.
+An MCP relay that turns Android phones into AI-controllable devices. Relay runs as an Android AccessibilityService and exposes phone inspection and control as MCP tools, allowing any AI agent to relay actions to the device.
 
 ## Architecture
 
@@ -53,9 +53,9 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## Enable Accessibility Service
 
-1. Open **Android Agent** app
+1. Open **Relay** app
 2. Tap **OPEN ACCESSIBILITY SETTINGS**
-3. Find **Android Agent** → toggle **ON**
+3. Find **Relay** → toggle **ON**
 4. Confirm the permission dialog
 
 ## Start MCP Server
@@ -158,7 +158,7 @@ For Claude Desktop or similar MCP clients, add to your config:
 ```json
 {
   "mcpServers": {
-    "android-agent": {
+    "relay": {
       "url": "http://<PHONE_IP>:8765/mcp",
       "headers": {
         "Authorization": "Bearer <YOUR_TOKEN>"

@@ -32,6 +32,10 @@ class McpHandler(private val context: Context) {
         private const val CLICK_DEADLINE_MS = 4000L
     }
 
+    private var lastObserveTimestamp = 0L
+    private var lastElementCount = 0
+    private var lastScene: SemanticScene? = null
+
     fun init() {
         appRegistry.register()
     }
@@ -152,6 +156,24 @@ class McpHandler(private val context: Context) {
             "Use this instead of get_screen_state for cleaner reasoning.",
             JSONObject()))
 
+        tools.put(toolDef("find",
+            "Search the current screen for an element matching text and/or role. " +
+            "Returns the element if found, or found=false. " +
+            "Uses the last observe() result - call observe() first if the screen may have changed.",
+            JSONObject().apply {
+                put("text", stringParam("Text to search for (case-insensitive substring match)"))
+                put("role", stringParam("Element role to match: action, input, toggle, value, header, list, tab"))
+            }))
+
+        tools.put(toolDef("scroll_until",
+            "Scroll the screen until an element with matching text is visible. " +
+            "Relay owns the observe-scroll-observe loop. One call replaces multiple tool calls.",
+            JSONObject().apply {
+                put("text", stringParam("Text to search for while scrolling"))
+                put("direction", stringParam("Scroll direction: down or up (default: down)"))
+                put("maxScrolls", intParam("Maximum scroll attempts (default: 6)"))
+            }))
+
         tools.put(toolDef("diag_sealed",
             "DIAGNOSTIC: Tests node sealed lifecycle. Walk tree, recycle all, re-walk, try performAction.",
             JSONObject().apply {
@@ -183,6 +205,8 @@ class McpHandler(private val context: Context) {
             "open_app" -> openApp(id, args)
             "current_app" -> currentApp(id)
             "observe" -> observe(id)
+            "find" -> find(id, args)
+            "scroll_until" -> scrollUntil(id, args)
             "diag_sealed" -> diagSealed(id, args)
             else -> errorResponse(id, "Unknown tool: $toolName")
         }
@@ -324,6 +348,31 @@ class McpHandler(private val context: Context) {
         val service = AgentAccessibilityService.instance
             ?: return toolErrorResponse(id, "Accessibility service not running")
 
+        val firstResult = attemptClick(id, elementId, service, deadline, startTime)
+        if (!isErrorResponse(firstResult)) {
+            return firstResult
+        }
+
+        Log.d(TAG, "[click_node] first attempt failed, retrying with fresh snapshot")
+        val retryResult = retryClickWithFreshSnapshot(id, elementId, service, deadline, startTime)
+        if (retryResult != null && !isErrorResponse(retryResult)) {
+            return retryResult
+        }
+
+        return firstResult
+    }
+
+    private fun isErrorResponse(result: String): Boolean {
+        return result.startsWith("""{"error":""" ) || result.contains("\"error\"")
+    }
+
+    private fun attemptClick(
+        id: String,
+        elementId: ElementId,
+        service: AgentAccessibilityService,
+        deadline: Long,
+        startTime: Long
+    ): String {
         val t0 = System.currentTimeMillis()
         val descriptor = NodeResolver.snapshotManager.getDescriptor(elementId.snapshotId, elementId.nodeId)
             ?: return toolErrorResponse(id, "element_expired: the element's snapshot is no longer cached. " +
@@ -333,7 +382,7 @@ class McpHandler(private val context: Context) {
         Log.d(TAG, "[click_node] resolve: ${t1 - t0}ms")
 
         val traversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
-            ?: return toolErrorResponse(id, "element_not_found: element $elementIdRaw could not be resolved " +
+            ?: return toolErrorResponse(id, "element_not_found: element ${elementId.encode()} could not be resolved " +
                 "against the current screen. Call get_screen_state to refresh.")
 
         val t2 = System.currentTimeMillis()
@@ -419,6 +468,54 @@ class McpHandler(private val context: Context) {
         } finally {
             NodeResolver.recycleAll(traversal)
         }
+    }
+
+    private fun retryClickWithFreshSnapshot(
+        id: String,
+        oldElementId: ElementId,
+        service: AgentAccessibilityService,
+        deadline: Long,
+        startTime: Long
+    ): String? {
+        val oldDescriptor = NodeResolver.snapshotManager.getDescriptor(
+            oldElementId.snapshotId, oldElementId.nodeId
+        ) ?: return null
+
+        val rootNode = findForegroundRoot(service) ?: return null
+        val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
+        val newDescriptors = NodeResolver.buildDescriptors(tree)
+        val newSnapshotId = NodeResolver.snapshotManager.store(newDescriptors, tree.foregroundPackage)
+
+        var bestNewNodeId = -1
+        var bestScore = 0
+        for ((nodeId, newDescriptor) in newDescriptors) {
+            val score = scoreDescriptorVsDescriptor(oldDescriptor, newDescriptor)
+            if (score > bestScore) {
+                bestScore = score
+                bestNewNodeId = nodeId
+            }
+        }
+
+        if (bestNewNodeId < 0 || bestScore < 10) {
+            Log.d(TAG, "[click_node] retry: no match found in fresh snapshot (bestScore=$bestScore)")
+            return null
+        }
+
+        val newElementId = ElementId(newSnapshotId, bestNewNodeId)
+        Log.d(TAG, "[click_node] retry: matched new element ${newElementId.encode()} with score $bestScore")
+        return attemptClick(id, newElementId, service, deadline, startTime)
+    }
+
+    private fun scoreDescriptorVsDescriptor(
+        old: NodeDescriptor,
+        new: NodeDescriptor
+    ): Int {
+        var score = 0
+        if (old.viewIdResourceName != null && old.viewIdResourceName == new.viewIdResourceName) score += 50
+        if (old.text != null && old.text == new.text) score += 40
+        if (old.contentDescription != null && old.contentDescription == new.contentDescription) score += 40
+        if (old.className != null && old.className == new.className) score += 5
+        return score
     }
 
     private fun performClick(
@@ -981,7 +1078,155 @@ class McpHandler(private val context: Context) {
 
         val scene = SemanticProjector.project(tree, snapshotId, metrics.heightPixels)
 
-        return toolSuccessResponse(id, scene.toJson())
+        val now = System.currentTimeMillis()
+        val timeSinceLastObserve = now - lastObserveTimestamp
+        val elementCount = scene.totalDescendantCount()
+        val elementCountDelta = if (lastElementCount > 0) {
+            kotlin.math.abs(elementCount - lastElementCount).toDouble() / lastElementCount
+        } else 0.0
+
+        val keyboardVisible = detectKeyboard(service)
+        val dialogVisible = detectDialog(tree)
+        val transitioning = timeSinceLastObserve < 200 || elementCountDelta > 0.3
+        val stable = !keyboardVisible && !dialogVisible && !transitioning
+
+        lastObserveTimestamp = now
+        lastElementCount = elementCount
+        lastScene = scene
+
+        val json = JSONObject(scene.toJson())
+        json.put("screenState", JSONObject().apply {
+            put("state", if (stable) "stable" else if (transitioning) "transitioning" else "unknown")
+            put("keyboardVisible", keyboardVisible)
+            put("dialogVisible", dialogVisible)
+        })
+        return toolSuccessResponse(id, json.toString())
+    }
+
+    private fun detectKeyboard(service: AgentAccessibilityService): Boolean {
+        for (window in service.windows) {
+            if (window.type == android.view.WindowManager.LayoutParams.TYPE_INPUT_METHOD) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun detectDialog(tree: com.agent.accessibility.model.AccessibilityTreeData): Boolean {
+        val root = tree.root ?: return false
+        val className = root.className ?: return false
+        return className.contains("Dialog", ignoreCase = true) ||
+               className.contains("AlertDialog", ignoreCase = true) ||
+               className.contains("PopupWindow", ignoreCase = true)
+    }
+
+    private fun observeInternal(service: AgentAccessibilityService): SemanticScene {
+        val rootNode = findForegroundRoot(service)
+            ?: return SemanticScene(null, null, false, emptyList())
+        val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
+        val descriptors = NodeResolver.buildDescriptors(tree)
+        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(metrics)
+        return SemanticProjector.project(tree, snapshotId, metrics.heightPixels)
+    }
+
+    private fun searchElement(
+        elements: List<SemanticElement>,
+        text: String,
+        role: String,
+        results: MutableList<SemanticElement>
+    ) {
+        for (el in elements) {
+            val textMatch = text.isEmpty() ||
+                (el.title?.contains(text, ignoreCase = true) == true) ||
+                (el.summary?.contains(text, ignoreCase = true) == true)
+            val roleMatch = role.isEmpty() || el.role.value == role
+
+            if (textMatch && roleMatch) {
+                results.add(el)
+            }
+
+            if (el.children.isNotEmpty()) {
+                searchElement(el.children, text, role, results)
+            }
+        }
+    }
+
+    private fun find(id: String, args: JSONObject): String {
+        val searchText = args.optString("text", "")
+        val searchRole = args.optString("role", "")
+
+        val scene = lastScene
+            ?: return toolErrorResponse(id, "No screen data. Call observe() first.")
+
+        val results = mutableListOf<SemanticElement>()
+        searchElement(scene.elements, searchText, searchRole, results)
+
+        if (results.isEmpty()) {
+            return toolSuccessResponse(id, JSONObject().apply {
+                put("found", false)
+            }.toString())
+        }
+
+        val best = results[0]
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("found", true)
+            put("element", best.toJson())
+        }.toString())
+    }
+
+    private fun scrollUntil(id: String, args: JSONObject): String {
+        val searchText = args.optString("text", "")
+        val direction = args.optString("direction", "down")
+        val maxScrolls = args.optInt("maxScrolls", 6)
+
+        val service = AgentAccessibilityService.instance
+            ?: return toolErrorResponse(id, "Accessibility service not running")
+
+        var scene = observeInternal(service)
+        lastScene = scene
+
+        var results = mutableListOf<SemanticElement>()
+        searchElement(scene.elements, searchText, "", results)
+        if (results.isNotEmpty()) {
+            return toolSuccessResponse(id, JSONObject().apply {
+                put("found", true)
+                put("element", results[0].toJson())
+                put("scrollsPerformed", 0)
+            }.toString())
+        }
+
+        val screenH = getScreenHeight()
+        val screenW = getScreenWidth()
+        val centerX = screenW / 2
+
+        for (scroll in 1..maxScrolls) {
+            val startY = if (direction == "down") screenH * 2 / 3 else screenH / 3
+            val endY = if (direction == "down") screenH / 3 else screenH * 2 / 3
+            dispatchScrollGesture(centerX, startY, centerX, endY, 300)
+            Thread.sleep(400)
+
+            scene = observeInternal(service)
+            lastScene = scene
+
+            results = mutableListOf()
+            searchElement(scene.elements, searchText, "", results)
+            if (results.isNotEmpty()) {
+                return toolSuccessResponse(id, JSONObject().apply {
+                    put("found", true)
+                    put("element", results[0].toJson())
+                    put("scrollsPerformed", scroll)
+                }.toString())
+            }
+        }
+
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("found", false)
+            put("scrollsPerformed", maxScrolls)
+        }.toString())
     }
 
     private fun isSealed(node: AccessibilityNodeInfo): Boolean {

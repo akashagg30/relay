@@ -1,8 +1,8 @@
-# Android Agent — Project Context
+# Relay — Project Context
 
 ## What This Is
 
-An Android app that turns a phone into an MCP-controlled device for AI agents. An external AI can inspect the screen and perform actions (tap, swipe, type, navigate) via HTTP.
+An MCP relay that turns Android phones into AI-controllable devices. Relay runs as an Android app and exposes phone inspection and control as MCP tools, allowing any AI agent to relay actions to the device via HTTP.
 
 ## Architecture
 
@@ -130,7 +130,7 @@ loop:
 ```bash
 export ANDROID_HOME=~/android-sdk
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-cd ~/akash/android-agent
+cd ~/akash/relay
 ./gradlew assembleDebug
 # APK: app/build/outputs/apk/debug/app-debug.apk
 ```

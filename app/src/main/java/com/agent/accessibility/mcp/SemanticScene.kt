@@ -2,6 +2,7 @@ package com.agent.accessibility.mcp
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 
 data class SemanticScene(
     val app: String?,
@@ -14,12 +15,55 @@ data class SemanticScene(
         json.put("app", app ?: "unknown")
         json.put("screenTitle", screenTitle ?: "unknown")
         json.put("scrollable", scrollable)
+        json.put("screenHash", computeScreenHash())
         val arr = JSONArray()
         for (el in elements) {
             arr.put(el.toJson())
         }
         json.put("elements", arr)
         return json.toString()
+    }
+
+    fun computeScreenHash(): String {
+        val sb = StringBuilder()
+        sb.append(app ?: "")
+        sb.append("|")
+        sb.append(screenTitle ?: "")
+        sb.append("|")
+        appendElementHash(sb, elements)
+        return sha256(sb.toString()).take(16)
+    }
+
+    private fun normalizeForHash(text: String?): String {
+        if (text == null) return ""
+        return text
+            .replace(Regex("\\d{1,2}:\\d{2}"), "TIME")
+            .replace(Regex("\\d{4}-\\d{2}-\\d{2}"), "DATE")
+            .replace(Regex("\\d+ (seconds?|minutes?|hours?|days?) ago"), "RELTIME")
+            .trim()
+    }
+
+    private fun appendElementHash(sb: StringBuilder, elements: List<SemanticElement>) {
+        for (el in elements) {
+            sb.append(el.role.value)
+            sb.append("|")
+            sb.append(normalizeForHash(el.title))
+            sb.append("|")
+            sb.append(normalizeForHash(el.summary))
+            sb.append("|")
+            sb.append(normalizeForHash(el.value))
+            sb.append("|")
+            sb.append(el.checked)
+            sb.append("|")
+            sb.append(el.selected)
+            sb.append("|")
+            sb.append(el.focused)
+            sb.append("|")
+            if (el.children.isNotEmpty()) {
+                appendElementHash(sb, el.children)
+            }
+            sb.append(")")
+        }
     }
 
     fun sizeBytes(): Int = toJson().length
@@ -33,6 +77,12 @@ data class SemanticScene(
         }
         return count
     }
+}
+
+private fun sha256(input: String): String {
+    val bytes = MessageDigest.getInstance("SHA-256")
+        .digest(input.toByteArray(Charsets.UTF_8))
+    return bytes.joinToString("") { "%02x".format(it) }
 }
 
 data class SemanticElement(

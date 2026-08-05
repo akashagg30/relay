@@ -42,6 +42,8 @@ fun DebugScreen(controller: AccessibilityController) {
     var isMcpRunning by remember { mutableStateOf(McpServerService.isRunning) }
     var mcpPort by remember { mutableIntStateOf(McpServerService.port) }
     var authToken by remember { mutableStateOf(McpServerService.authToken) }
+    var approvedClients by remember { mutableStateOf(McpServerService.instance?.getApprovedClientsList() ?: emptyList()) }
+    var auditLogs by remember { mutableStateOf(McpServerService.instance?.getAuditLogs(10) ?: emptyList()) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -51,6 +53,8 @@ fun DebugScreen(controller: AccessibilityController) {
             isMcpRunning = McpServerService.isRunning
             mcpPort = McpServerService.port
             authToken = McpServerService.authToken
+            approvedClients = McpServerService.instance?.getApprovedClientsList() ?: emptyList()
+            auditLogs = McpServerService.instance?.getAuditLogs(10) ?: emptyList()
             delay(1000)
         }
     }
@@ -117,6 +121,29 @@ fun DebugScreen(controller: AccessibilityController) {
                         clipboard.setPrimaryClip(ClipData.newPlainText("mcp_endpoint", endpoint))
                     }
                 )
+            }
+
+            if (isMcpRunning) {
+                item {
+                    SecurityCard(
+                        authToken = authToken,
+                        onRegenerateToken = {
+                            McpServerService.instance?.regenerateAuthToken()
+                        },
+                        onCopyToken = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("auth_token", authToken))
+                        },
+                        approvedClients = approvedClients,
+                        onRemoveClient = { clientIp ->
+                            McpServerService.instance?.removeApprovedClient(clientIp)
+                        },
+                        auditLogs = auditLogs,
+                        onClearLogs = {
+                            McpServerService.instance?.clearAuditLogs()
+                        }
+                    )
+                }
             }
 
             if (isServiceEnabled) {
@@ -679,6 +706,201 @@ fun DebugControlsCard(controller: AccessibilityController) {
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun SecurityCard(
+    authToken: String,
+    onRegenerateToken: () -> Unit,
+    onCopyToken: () -> Unit,
+    approvedClients: List<String>,
+    onRemoveClient: (String) -> Unit,
+    auditLogs: List<com.agent.accessibility.mcp.AuditLogger.AuditEntry>,
+    onClearLogs: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFFF9800).copy(alpha = 0.1f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Security",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            // Auth Token Section
+            Text(
+                text = "Auth Token",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = authToken,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 2
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onCopyToken,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                ) {
+                    Text("COPY TOKEN")
+                }
+                OutlinedButton(
+                    onClick = onRegenerateToken,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("REGENERATE")
+                }
+            }
+
+            HorizontalDivider()
+
+            // Approved Clients Section
+            Text(
+                text = "Approved Clients",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            if (approvedClients.isEmpty()) {
+                Text(
+                    text = "No approved clients",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            } else {
+                approvedClients.forEach { client ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = client,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { onRemoveClient(client) }) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Remove",
+                                tint = Color(0xFFF44336)
+                            )
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider()
+
+            // Audit Logs Section
+            Text(
+                text = "Audit Logs",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            if (auditLogs.isEmpty()) {
+                Text(
+                    text = "No audit logs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            } else {
+                auditLogs.forEach { entry ->
+                    val codeColor = when {
+                        entry.responseCode == 200 -> Color(0xFF4CAF50)
+                        entry.responseCode == 401 || entry.responseCode == 403 -> Color(0xFFF44336)
+                        entry.responseCode == 429 -> Color(0xFFFF9800)
+                        else -> Color.Unspecified
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                text = entry.timestamp,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = entry.sourceIp,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "${entry.responseCode}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = codeColor
+                                )
+                            }
+                            Text(
+                                text = "${entry.authStatus} | ${entry.method}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
+            }
+            OutlinedButton(
+                onClick = onClearLogs,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("CLEAR LOGS")
+            }
+
+            HorizontalDivider()
+
+            // Security Status
+            Text(
+                text = "Security Status",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Rate Limiting", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "Active (30 req/s)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF4CAF50)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Consent Prompt", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "Active",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF4CAF50)
+                )
             }
         }
     }

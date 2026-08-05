@@ -14,8 +14,6 @@ import android.util.Log
 import com.agent.accessibility.MainActivity
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
@@ -29,6 +27,7 @@ class McpServerService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val DEFAULT_PORT = 8765
         private const val CONSENT_REQUEST_ID = 2
+        private const val MAX_BODY_SIZE = 1_048_576 // 1MB
 
         var instance: McpServerService? = null
             private set
@@ -50,7 +49,7 @@ class McpServerService : Service() {
     private lateinit var rateLimiter: RateLimiter
     private lateinit var auditLogger: AuditLogger
     private lateinit var consentPrefs: SharedPreferences
-    private val executor = Executors.newCachedThreadPool()
+    private val executor = Executors.newFixedThreadPool(10)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -146,10 +145,10 @@ class McpServerService : Service() {
         val clientIp = socket.inetAddress.hostAddress ?: "unknown"
         
         try {
-            val input = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val rawInput = socket.getInputStream()
             val output = socket.getOutputStream()
 
-            val requestLine = input.readLine() ?: return
+            val requestLine = readStreamLine(rawInput) ?: return
             val parts = requestLine.split(" ")
             if (parts.size < 2) return
 
@@ -159,7 +158,7 @@ class McpServerService : Service() {
             val headers = mutableMapOf<String, String>()
             var contentLength = 0
             while (true) {
-                val line = input.readLine() ?: break
+                val line = readStreamLine(rawInput) ?: break
                 if (line.isEmpty()) break
                 val colon = line.indexOf(':')
                 if (colon > 0) {
@@ -173,14 +172,20 @@ class McpServerService : Service() {
             Log.d(TAG, "Request: $method $path from $clientIp Headers: ${headers.filter { it.key == "accept" || it.key == "content-type" }}")
 
             val body = if (contentLength > 0) {
-                val chars = CharArray(contentLength)
-                var read = 0
-                while (read < contentLength) {
-                    val n = input.read(chars, read, contentLength - read)
-                    if (n < 0) break
-                    read += n
+                if (contentLength > MAX_BODY_SIZE) {
+                    Log.w(TAG, "Body too large: $contentLength bytes from $clientIp")
+                    val response = tooLargeResponse()
+                    sendHttpResponse(output, response.first, response.second)
+                    return
                 }
-                String(chars, 0, read)
+                val bytes = ByteArray(contentLength)
+                var off = 0
+                while (off < contentLength) {
+                    val n = rawInput.read(bytes, off, contentLength - off)
+                    if (n < 0) break
+                    off += n
+                }
+                String(bytes, 0, off, Charsets.UTF_8)
             } else ""
 
             // Security checks for MCP endpoints
@@ -208,7 +213,6 @@ class McpServerService : Service() {
                 method == "GET" && path == "/health" -> handleHealth()
                 method == "GET" && path == "/mcp" -> handleSseGet()
                 method == "POST" && path == "/mcp" -> handleMcp(headers["authorization"], body, accept, clientIp)
-                method == "OPTIONS" -> corsResponse()
                 else -> notFound()
             }
 
@@ -282,10 +286,6 @@ class McpServerService : Service() {
         return Triple(200, response, useSse)
     }
 
-    private fun corsResponse(): Triple<Int, String, Boolean> {
-        return Triple(200, "", false)
-    }
-
     private fun rateLimitResponse(): Pair<Int, String> {
         return Pair(429, """{"error":"Too Many Requests"}""")
     }
@@ -294,16 +294,12 @@ class McpServerService : Service() {
         return Pair(403, """{"error":"Client not approved. Check phone for consent prompt."}""")
     }
 
+    private fun tooLargeResponse(): Pair<Int, String> {
+        return Pair(413, """{"error":"Request body too large"}""")
+    }
+
     private fun isClientApproved(clientIp: String): Boolean {
         val approvedClients = getApprovedClients()
-        
-        // For the first connection (no approved clients yet), auto-approve but still show notification as info
-        if (approvedClients.isEmpty()) {
-            approveClient(clientIp)
-            showInfoNotification(clientIp, true) // Auto-approved
-            return true
-        }
-        
         return approvedClients.contains(clientIp)
     }
 
@@ -430,6 +426,22 @@ class McpServerService : Service() {
         return Triple(404, """{"error":"Not found"}""", false)
     }
 
+    private fun readStreamLine(input: java.io.InputStream): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val b = input.read()
+            if (b < 0) return if (sb.isEmpty()) null else sb.toString()
+            if (b == '\r'.code) {
+                val next = input.read()
+                if (next == '\n'.code) return sb.toString()
+                sb.append(b.toChar())
+                if (next >= 0) sb.append(next.toChar())
+                continue
+            }
+            sb.append(b.toChar())
+        }
+    }
+
     private fun sendHttpResponse(output: OutputStream, statusCode: Int, body: String) {
         val bytes = body.toByteArray(Charsets.UTF_8)
         val statusText = when (statusCode) {
@@ -441,6 +453,7 @@ class McpServerService : Service() {
             404 -> "Not Found"
             405 -> "Method Not Allowed"
             429 -> "Too Many Requests"
+            413 -> "Payload Too Large"
             else -> "Error"
         }
         val header = buildString {
@@ -449,9 +462,6 @@ class McpServerService : Service() {
                 append("Content-Type: application/json\r\n")
             }
             append("Content-Length: ${bytes.size}\r\n")
-            append("Access-Control-Allow-Origin: *\r\n")
-            append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
-            append("Access-Control-Allow-Headers: Content-Type, Authorization\r\n")
             append("Connection: close\r\n")
             append("\r\n")
         }
@@ -471,9 +481,6 @@ class McpServerService : Service() {
             append("Cache-Control: no-cache\r\n")
             append("X-Accel-Buffering: no\r\n")
             append("Connection: keep-alive\r\n")
-            append("Access-Control-Allow-Origin: *\r\n")
-            append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
-            append("Access-Control-Allow-Headers: Content-Type, Authorization, Accept\r\n")
             append("\r\n")
         }
         output.write(header.toByteArray())
@@ -527,7 +534,7 @@ class McpServerService : Service() {
 
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Relay MCP Server")
-            .setContentText("Port $port | Token: ${authToken.take(8)}...")
+            .setContentText("Port $port | Token: ...${authToken.takeLast(4)}")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

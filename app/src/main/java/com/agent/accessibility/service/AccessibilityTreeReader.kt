@@ -7,12 +7,6 @@ import com.agent.accessibility.model.RectData
 
 object AccessibilityTreeReader {
 
-    private var nodeIdCounter = 0
-
-    fun resetNodeIdCounter() {
-        nodeIdCounter = 0
-    }
-
     fun readTree(root: AccessibilityNodeInfo?): AccessibilityTreeData {
         if (root == null) {
             return AccessibilityTreeData(
@@ -22,8 +16,8 @@ object AccessibilityTreeReader {
             )
         }
 
-        resetNodeIdCounter()
-        val nodeData = convertNode(root)
+        val counter = intArrayOf(0)
+        val nodeData = convertNode(root, counter)
         val totalCount = nodeData?.flatten()?.size ?: 0
 
         return AccessibilityTreeData(
@@ -34,8 +28,8 @@ object AccessibilityTreeReader {
     }
 
     @Suppress("DEPRECATION")
-    private fun convertNode(node: AccessibilityNodeInfo): AccessibilityNodeData {
-        val nodeId = nodeIdCounter++
+    private fun convertNode(node: AccessibilityNodeInfo, counter: IntArray): AccessibilityNodeData {
+        val nodeId = counter[0]++
         val isVisible = node.isVisibleToUser
 
         val bounds = RectData(0, 0, 0, 0)
@@ -48,7 +42,7 @@ object AccessibilityTreeReader {
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i)
                 if (child != null) {
-                    children.add(convertNode(child))
+                    children.add(convertNode(child, counter))
                     child.recycle()
                 }
             }

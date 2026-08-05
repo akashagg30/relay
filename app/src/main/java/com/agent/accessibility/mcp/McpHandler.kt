@@ -32,9 +32,9 @@ class McpHandler(private val context: Context) {
         private const val CLICK_DEADLINE_MS = 4000L
     }
 
-    private var lastObserveTimestamp = 0L
-    private var lastElementCount = 0
-    private var lastScene: SemanticScene? = null
+    @Volatile private var lastObserveTimestamp = 0L
+    @Volatile private var lastElementCount = 0
+    @Volatile private var lastScene: SemanticScene? = null
 
     fun init() {
         appRegistry.register()
@@ -219,30 +219,35 @@ class McpHandler(private val context: Context) {
         val rootNode = findForegroundRoot(service)
             ?: return toolErrorResponse(id, "No active window")
 
-        val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
+        try {
+            val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
 
-        // Store descriptors in snapshot manager
-        val descriptors = NodeResolver.buildDescriptors(tree)
-        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
+            // Store descriptors in snapshot manager
+            val descriptors = NodeResolver.buildDescriptors(tree)
+            val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
 
-        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val metrics = DisplayMetrics()
-        @Suppress("DEPRECATION")
-        wm.defaultDisplay.getRealMetrics(metrics)
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
 
-        val nodesArray = JSONArray()
-        tree.root?.let { flattenForJson(it, null, nodesArray, snapshotId) }
+            val nodesArray = JSONArray()
+            tree.root?.let { flattenForJson(it, null, nodesArray, snapshotId) }
 
-        val result = JSONObject().apply {
-            put("snapshotId", snapshotId)
-            put("packageName", tree.foregroundPackage ?: "unknown")
-            put("timestamp", tree.timestamp)
-            put("screenWidth", metrics.widthPixels)
-            put("screenHeight", metrics.heightPixels)
-            put("nodes", nodesArray)
+            val result = JSONObject().apply {
+                put("snapshotId", snapshotId)
+                put("packageName", tree.foregroundPackage ?: "unknown")
+                put("timestamp", tree.timestamp)
+                put("screenWidth", metrics.widthPixels)
+                put("screenHeight", metrics.heightPixels)
+                put("nodes", nodesArray)
+            }
+
+            return toolSuccessResponse(id, result.toString())
+        } finally {
+            @Suppress("DEPRECATION")
+            rootNode.recycle()
         }
-
-        return toolSuccessResponse(id, result.toString())
     }
 
     private fun findForegroundRoot(service: AgentAccessibilityService): AccessibilityNodeInfo? {
@@ -1066,41 +1071,46 @@ class McpHandler(private val context: Context) {
         val rootNode = findForegroundRoot(service)
             ?: return toolErrorResponse(id, "No active window")
 
-        val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
+        try {
+            val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
 
-        val descriptors = NodeResolver.buildDescriptors(tree)
-        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
+            val descriptors = NodeResolver.buildDescriptors(tree)
+            val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
 
-        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val metrics = DisplayMetrics()
-        @Suppress("DEPRECATION")
-        wm.defaultDisplay.getRealMetrics(metrics)
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
 
-        val scene = SemanticProjector.project(tree, snapshotId, metrics.heightPixels)
+            val scene = SemanticProjector.project(tree, snapshotId, metrics.heightPixels, metrics.widthPixels)
 
-        val now = System.currentTimeMillis()
-        val timeSinceLastObserve = now - lastObserveTimestamp
-        val elementCount = scene.totalDescendantCount()
-        val elementCountDelta = if (lastElementCount > 0) {
-            kotlin.math.abs(elementCount - lastElementCount).toDouble() / lastElementCount
-        } else 0.0
+            val now = System.currentTimeMillis()
+            val timeSinceLastObserve = now - lastObserveTimestamp
+            val elementCount = scene.totalDescendantCount()
+            val elementCountDelta = if (lastElementCount > 0) {
+                kotlin.math.abs(elementCount - lastElementCount).toDouble() / lastElementCount
+            } else 0.0
 
-        val keyboardVisible = detectKeyboard(service)
-        val dialogVisible = detectDialog(tree)
-        val transitioning = timeSinceLastObserve < 200 || elementCountDelta > 0.3
-        val stable = !keyboardVisible && !dialogVisible && !transitioning
+            val keyboardVisible = detectKeyboard(service)
+            val dialogVisible = detectDialog(tree)
+            val transitioning = timeSinceLastObserve < 200 || elementCountDelta > 0.3
+            val stable = !keyboardVisible && !dialogVisible && !transitioning
 
-        lastObserveTimestamp = now
-        lastElementCount = elementCount
-        lastScene = scene
+            lastObserveTimestamp = now
+            lastElementCount = elementCount
+            lastScene = scene
 
-        val json = JSONObject(scene.toJson())
-        json.put("screenState", JSONObject().apply {
-            put("state", if (stable) "stable" else if (transitioning) "transitioning" else "unknown")
-            put("keyboardVisible", keyboardVisible)
-            put("dialogVisible", dialogVisible)
-        })
-        return toolSuccessResponse(id, json.toString())
+            val json = JSONObject(scene.toJson())
+            json.put("screenState", JSONObject().apply {
+                put("state", if (stable) "stable" else if (transitioning) "transitioning" else "unknown")
+                put("keyboardVisible", keyboardVisible)
+                put("dialogVisible", dialogVisible)
+            })
+            return toolSuccessResponse(id, json.toString())
+        } finally {
+            @Suppress("DEPRECATION")
+            rootNode.recycle()
+        }
     }
 
     private fun detectKeyboard(service: AgentAccessibilityService): Boolean {
@@ -1130,7 +1140,7 @@ class McpHandler(private val context: Context) {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(metrics)
-        return SemanticProjector.project(tree, snapshotId, metrics.heightPixels)
+        return SemanticProjector.project(tree, snapshotId, metrics.heightPixels, metrics.widthPixels)
     }
 
     private fun searchElement(

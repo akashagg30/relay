@@ -14,6 +14,7 @@ class AgentAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "AgentAccessibility"
         private const val OUR_PACKAGE = "com.agent.accessibility"
+        private const val MAX_SNAPSHOTS = 5
 
         var instance: AgentAccessibilityService? = null
             private set
@@ -62,6 +63,9 @@ class AgentAccessibilityService : AccessibilityService() {
         val snapshot = TreeSnapshot(tree = tree, source = source)
 
         _snapshots.add(snapshot)
+        while (_snapshots.size > MAX_SNAPSHOTS) {
+            _snapshots.removeAt(0)
+        }
 
         if (tree.foregroundPackage != OUR_PACKAGE) {
             lastExternalSnapshot = snapshot

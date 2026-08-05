@@ -160,10 +160,11 @@ data class BoundsHint(
     }
 
     companion object {
-        fun fromBounds(left: Int, top: Int, right: Int, bottom: Int, screenH: Int): BoundsHint {
+        fun fromBounds(left: Int, top: Int, right: Int, bottom: Int, screenH: Int, screenW: Int): BoundsHint {
             val position = when {
-                left < 100 -> "left"
-                right > 900 -> "right"
+                screenW <= 0 -> "center"
+                left < screenW * 0.1 -> "left"
+                right > screenW * 0.9 -> "right"
                 else -> "center"
             }
             val vertical = when {

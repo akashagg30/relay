@@ -7,7 +7,7 @@ object SemanticProjector {
 
     private const val TAG = "SemanticProjector"
 
-    fun project(tree: AccessibilityTreeData, snapshotId: Long, screenHeight: Int): SemanticScene {
+    fun project(tree: AccessibilityTreeData, snapshotId: Long, screenHeight: Int, screenWidth: Int = 1080): SemanticScene {
         val root = tree.root
         if (root == null) {
             return SemanticScene(
@@ -20,7 +20,7 @@ object SemanticProjector {
 
         val screenTitle = extractScreenTitle(root)
         val isScrollable = hasScrollableDescendant(root)
-        val elements = projectChildren(root, snapshotId, screenHeight)
+        val elements = projectChildren(root, snapshotId, screenHeight, screenWidth)
 
         return SemanticScene(
             app = tree.foregroundPackage,
@@ -65,12 +65,13 @@ object SemanticProjector {
     private fun projectChildren(
         parent: AccessibilityNodeData,
         snapshotId: Long,
-        screenHeight: Int
+        screenHeight: Int,
+        screenWidth: Int
     ): List<SemanticElement> {
         val result = mutableListOf<SemanticElement>()
 
         for (child in parent.children) {
-            val projected = projectNode(child, snapshotId, screenHeight)
+            val projected = projectNode(child, snapshotId, screenHeight, screenWidth)
             if (projected != null) {
                 result.add(projected)
             }
@@ -82,7 +83,8 @@ object SemanticProjector {
     private fun projectNode(
         node: AccessibilityNodeData,
         snapshotId: Long,
-        screenHeight: Int
+        screenHeight: Int,
+        screenWidth: Int
     ): SemanticElement? {
         // Skip decorative images (no text, no description, not clickable)
         if (isDecorativeImage(node)) return null
@@ -98,7 +100,7 @@ object SemanticProjector {
             BoundsHint.fromBounds(
                 node.boundsInScreen.left, node.boundsInScreen.top,
                 node.boundsInScreen.right, node.boundsInScreen.bottom,
-                screenHeight
+                screenHeight, screenWidth
             )
         } else {
             null  // Off-screen elements may have degenerate bounds
@@ -106,7 +108,7 @@ object SemanticProjector {
 
         // Determine role
         val role = determineRole(node)
-        val children = projectChildren(node, snapshotId, screenHeight)
+        val children = projectChildren(node, snapshotId, screenHeight, screenWidth)
 
         // Skip empty nodes with no text, no description, not clickable, no children
         if (node.text.isNullOrBlank() && node.contentDescription.isNullOrBlank() &&

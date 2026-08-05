@@ -2,7 +2,14 @@
 
 ## What This Is
 
-An MCP relay that turns Android phones into AI-controllable devices. Relay runs as an Android app and exposes phone inspection and control as MCP tools, allowing any AI agent to relay actions to the device via HTTP.
+Relay is an MCP server that lets AI agents explore, interact with, and test Android apps. No test scripts needed — just natural language instructions to an AI agent. Relay runs as an Android AccessibilityService and exposes phone inspection and control as MCP tools, allowing any AI agent to relay actions to the device via HTTP.
+
+## Target Market
+
+- **QA teams** — Automate regression testing with AI agents instead of brittle UI scripts
+- **AI testing startups** — Build AI-powered mobile testing platforms on top of Relay
+- **Mobile dev teams** — Integrate AI-driven app exploration into CI/CD pipelines
+- **Accessibility consultants** — Use AI agents to validate app accessibility in real-time
 
 ## Architecture
 

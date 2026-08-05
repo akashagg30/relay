@@ -1,10 +1,18 @@
-# Relay — MCP Server for Android
+# Relay — Let AI Agents Test Your Android Apps
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-An MCP relay that turns Android phones into AI-controllable devices. Relay runs as an Android AccessibilityService and exposes phone inspection and control as MCP tools, allowing any AI agent to relay actions to the device.
+Relay is an MCP server that lets AI agents explore, interact with, and test Android apps. No test scripts needed — just natural language instructions to an AI agent.
 
 **Open Source** — Apache 2.0. Free to use, modify, and distribute. Premium features (Relay Cloud, enterprise, managed hosting) will be proprietary.
+
+## Use Cases
+
+- **AI-driven regression testing** — Let AI agents re-run test flows after every build
+- **Automated app exploration and bug finding** — Agents navigate apps to discover crashes and UX issues
+- **Natural language test cases (no code)** — Write test scenarios in plain English, execute via AI
+- **CI/CD integration for mobile QA** — Plug into existing pipelines for automated mobile testing
+- **Accessibility testing via AI** — Agents validate app accessibility with real device interactions
 
 ## Architecture
 

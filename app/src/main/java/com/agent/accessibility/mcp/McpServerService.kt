@@ -7,10 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import com.agent.accessibility.MainActivity
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -26,6 +28,7 @@ class McpServerService : Service() {
         private const val CHANNEL_ID = "mcp_server_channel"
         private const val NOTIFICATION_ID = 1
         private const val DEFAULT_PORT = 8765
+        private const val CONSENT_REQUEST_ID = 2
 
         var instance: McpServerService? = null
             private set
@@ -44,6 +47,9 @@ class McpServerService : Service() {
     private var serverThread: Thread? = null
     private lateinit var authManager: AuthManager
     private lateinit var mcpHandler: McpHandler
+    private lateinit var rateLimiter: RateLimiter
+    private lateinit var auditLogger: AuditLogger
+    private lateinit var consentPrefs: SharedPreferences
     private val executor = Executors.newCachedThreadPool()
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -53,6 +59,9 @@ class McpServerService : Service() {
         instance = this
         authManager = AuthManager(this)
         mcpHandler = McpHandler(this)
+        rateLimiter = RateLimiter()
+        auditLogger = AuditLogger(this)
+        consentPrefs = getSharedPreferences("mcp_consent", Context.MODE_PRIVATE)
         authToken = authManager.token
         Log.d(TAG, "MCP Server service created")
     }
@@ -61,6 +70,19 @@ class McpServerService : Service() {
         when (intent?.action) {
             "START" -> startServer()
             "STOP" -> stopServer()
+            "APPROVE_CLIENT" -> {
+                val clientIp = intent.getStringExtra("client_ip")
+                if (clientIp != null) {
+                    approveClient(clientIp)
+                    showInfoNotification(clientIp, false)
+                }
+            }
+            "DENY_CLIENT" -> {
+                val clientIp = intent.getStringExtra("client_ip")
+                if (clientIp != null) {
+                    denyClient(clientIp)
+                }
+            }
         }
         return START_STICKY
     }
@@ -121,6 +143,8 @@ class McpServerService : Service() {
 
     private fun handleClient(socket: Socket) {
         var keepAlive = false
+        val clientIp = socket.inetAddress.hostAddress ?: "unknown"
+        
         try {
             val input = BufferedReader(InputStreamReader(socket.getInputStream()))
             val output = socket.getOutputStream()
@@ -146,7 +170,7 @@ class McpServerService : Service() {
                 }
             }
 
-            Log.d(TAG, "Request: $method $path Headers: ${headers.filter { it.key == "accept" || it.key == "content-type" }}")
+            Log.d(TAG, "Request: $method $path from $clientIp Headers: ${headers.filter { it.key == "accept" || it.key == "content-type" }}")
 
             val body = if (contentLength > 0) {
                 val chars = CharArray(contentLength)
@@ -159,14 +183,40 @@ class McpServerService : Service() {
                 String(chars, 0, read)
             } else ""
 
+            // Security checks for MCP endpoints
+            if (path == "/mcp" && method == "POST") {
+                // Rate limiting check
+                if (!rateLimiter.isAllowed(clientIp)) {
+                    val response = rateLimitResponse()
+                    auditLogger.logRequest(clientIp, "rate_limited", "POST /mcp", 429)
+                    sendHttpResponse(output, response.first, response.second)
+                    return
+                }
+
+                // Consent check for new clients
+                if (!isClientApproved(clientIp)) {
+                    showConsentPrompt(clientIp)
+                    val response = consentRequiredResponse()
+                    auditLogger.logRequest(clientIp, "consent_required", "POST /mcp", 403)
+                    sendHttpResponse(output, response.first, response.second)
+                    return
+                }
+            }
+
             val accept = headers["accept"] ?: ""
             val response = when {
                 method == "GET" && path == "/health" -> handleHealth()
                 method == "GET" && path == "/mcp" -> handleSseGet()
-                method == "POST" && path == "/mcp" -> handleMcp(headers["authorization"], body, accept)
+                method == "POST" && path == "/mcp" -> handleMcp(headers["authorization"], body, accept, clientIp)
                 method == "OPTIONS" -> corsResponse()
                 else -> notFound()
             }
+
+            // Log the request
+            val authStatus = if (path == "/mcp" && method == "POST") {
+                if (authManager.validate(headers["authorization"])) "accepted" else "rejected"
+            } else "n/a"
+            auditLogger.logRequest(clientIp, authStatus, "$method $path", response.first)
 
             if (response.third) {
                 // SSE response
@@ -182,6 +232,7 @@ class McpServerService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Client handler error", e)
+            auditLogger.logRequest(clientIp, "error", "unknown", 500)
         } finally {
             try {
                 if (!keepAlive) socket.close()
@@ -209,12 +260,12 @@ class McpServerService : Service() {
         return Triple(200, """{"uri":"/mcp"}""", true)
     }
 
-    private fun handleMcp(authHeader: String?, body: String, accept: String = ""): Triple<Int, String, Boolean> {
+    private fun handleMcp(authHeader: String?, body: String, accept: String = "", clientIp: String = "unknown"): Triple<Int, String, Boolean> {
         if (!authManager.validate(authHeader)) {
             return Triple(401, """{"error":"Unauthorized"}""", false)
         }
 
-        Log.d(TAG, "MCP request: ${body.take(200)}")
+        Log.d(TAG, "MCP request from $clientIp: ${body.take(200)}")
         val response = mcpHandler.handleRequest(body)
 
         // Empty response means it was a notification
@@ -235,6 +286,146 @@ class McpServerService : Service() {
         return Triple(200, "", false)
     }
 
+    private fun rateLimitResponse(): Pair<Int, String> {
+        return Pair(429, """{"error":"Too Many Requests"}""")
+    }
+
+    private fun consentRequiredResponse(): Pair<Int, String> {
+        return Pair(403, """{"error":"Client not approved. Check phone for consent prompt."}""")
+    }
+
+    private fun isClientApproved(clientIp: String): Boolean {
+        val approvedClients = getApprovedClients()
+        
+        // For the first connection (no approved clients yet), auto-approve but still show notification as info
+        if (approvedClients.isEmpty()) {
+            approveClient(clientIp)
+            showInfoNotification(clientIp, true) // Auto-approved
+            return true
+        }
+        
+        return approvedClients.contains(clientIp)
+    }
+
+    private fun showConsentPrompt(clientIp: String) {
+        val approveIntent = Intent(this, McpServerService::class.java).apply {
+            action = "APPROVE_CLIENT"
+            putExtra("client_ip", clientIp)
+        }
+        val approvePendingIntent = PendingIntent.getService(
+            this, 0, approveIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val denyIntent = Intent(this, McpServerService::class.java).apply {
+            action = "DENY_CLIENT"
+            putExtra("client_ip", clientIp)
+        }
+        val denyPendingIntent = PendingIntent.getService(
+            this, 1, denyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("New MCP Client Request")
+            .setContentText("Client $clientIp wants to connect")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .addAction(Notification.Action.Builder(
+                null, "Allow", approvePendingIntent
+            ).build())
+            .addAction(Notification.Action.Builder(
+                null, "Deny", denyPendingIntent
+            ).build())
+            .setAutoCancel(true)
+            .build()
+
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(CONSENT_REQUEST_ID, notification)
+    }
+
+    private fun showInfoNotification(clientIp: String, autoApproved: Boolean) {
+        val message = if (autoApproved) {
+            "First client $clientIp auto-approved"
+        } else {
+            "Client $clientIp approved"
+        }
+
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("MCP Client Status")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setAutoCancel(true)
+            .build()
+
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(CONSENT_REQUEST_ID + 1, notification)
+    }
+
+    fun approveClient(clientIp: String) {
+        val approvedClients = getApprovedClients().toMutableSet()
+        approvedClients.add(clientIp)
+        saveApprovedClients(approvedClients)
+        
+        // Cancel consent prompt notification
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.cancel(CONSENT_REQUEST_ID)
+        
+        Log.d(TAG, "Client approved: $clientIp")
+    }
+
+    fun denyClient(clientIp: String) {
+        // Cancel consent prompt notification
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.cancel(CONSENT_REQUEST_ID)
+        
+        Log.d(TAG, "Client denied: $clientIp")
+    }
+
+    private fun getApprovedClients(): Set<String> {
+        val json = consentPrefs.getString("approved_clients", "[]") ?: "[]"
+        return try {
+            val array = JSONArray(json)
+            (0 until array.length()).map { array.getString(it) }.toSet()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse approved clients", e)
+            emptySet()
+        }
+    }
+
+    private fun saveApprovedClients(clients: Set<String>) {
+        val array = JSONArray()
+        clients.forEach { array.put(it) }
+        consentPrefs.edit().putString("approved_clients", array.toString()).apply()
+    }
+
+    fun getApprovedClientsList(): List<String> {
+        return getApprovedClients().toList()
+    }
+
+    fun removeApprovedClient(clientIp: String) {
+        val approvedClients = getApprovedClients().toMutableSet()
+        approvedClients.remove(clientIp)
+        saveApprovedClients(approvedClients)
+    }
+
+    fun regenerateAuthToken(): String {
+        val newToken = authManager.regenerateToken()
+        authToken = newToken
+        // Update the foreground notification to show new token
+        if (isRunning) {
+            startForegroundWithNotification()
+        }
+        return newToken
+    }
+
+    fun getAuditLogs(limit: Int = 10): List<AuditLogger.AuditEntry> {
+        return auditLogger.getRecentLogs(limit)
+    }
+
+    fun clearAuditLogs() {
+        auditLogger.clearLogs()
+    }
+
     private fun notFound(): Triple<Int, String, Boolean> {
         return Triple(404, """{"error":"Not found"}""", false)
     }
@@ -246,8 +437,10 @@ class McpServerService : Service() {
             202 -> "Accepted"
             204 -> "No Content"
             401 -> "Unauthorized"
+            403 -> "Forbidden"
             404 -> "Not Found"
             405 -> "Method Not Allowed"
+            429 -> "Too Many Requests"
             else -> "Error"
         }
         val header = buildString {
@@ -321,7 +514,7 @@ class McpServerService : Service() {
             "MCP Server",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Android Agent MCP Server"
+            description = "Relay MCP Server"
         }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(channel)
@@ -333,8 +526,8 @@ class McpServerService : Service() {
         )
 
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Android Agent MCP Server")
-            .setContentText("Running on port $port")
+            .setContentTitle("Relay MCP Server")
+            .setContentText("Port $port | Token: ${authToken.take(8)}...")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

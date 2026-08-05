@@ -28,7 +28,7 @@ AI Agent / MCP Client
 
 ## Current Phase
 
-Phase 2 — MCP server fully operational. All tools verified on Xiaomi MIUI and Motorola.
+Phase 3 — Security hardening complete. MCP server with authentication, rate limiting, consent prompts, and audit logging.
 
 ## Tech Stack
 
@@ -46,7 +46,9 @@ Phase 2 — MCP server fully operational. All tools verified on Xiaomi MIUI and 
 | `app/src/main/java/com/agent/accessibility/mcp/McpServerService.kt` | Foreground service, HTTP server on port 8765 |
 | `app/src/main/java/com/agent/accessibility/mcp/McpHandler.kt` | JSON-RPC tool dispatch, 14 tools |
 | `app/src/main/java/com/agent/accessibility/mcp/NodeResolver.kt` | Fresh traversal resolution, snapshot manager, scoring |
-| `app/src/main/java/com/agent/accessibility/mcp/AuthManager.kt` | Token auth (dev token: `11223344`) |
+| `app/src/main/java/com/agent/accessibility/mcp/AuthManager.kt` | Token auth (random 32-byte token, regeneratable) |
+| `app/src/main/java/com/agent/accessibility/mcp/RateLimiter.kt` | Rate limiting (30 req/sec per IP, sliding window) |
+| `app/src/main/java/com/agent/accessibility/mcp/AuditLogger.kt` | Request logging (last 100 entries, SharedPreferences) |
 | `app/src/main/java/com/agent/accessibility/mcp/AppRegistry.kt` | App discovery (list, search, open, current) |
 | `app/src/main/java/com/agent/accessibility/mcp/SemanticProjector.kt` | Raw tree → semantic scene for observe() |
 | `app/src/main/java/com/agent/accessibility/mcp/SemanticScene.kt` | Semantic data model (roles, elements, sections) |
@@ -81,13 +83,21 @@ Phase 2 — MCP server fully operational. All tools verified on Xiaomi MIUI and 
 - JSON-RPC 2.0 over HTTP POST
 - Endpoint: `POST http://<PHONE_IP>:8765/mcp`
 - Health: `GET http://<PHONE_IP>:8765/health`
-- Auth: `Authorization: Bearer 11223344`
+- Auth: `Authorization: Bearer <32-char-hex-token>`
 - Methods: `initialize`, `tools/list`, `tools/call`
 
 ## Auth Token
 
 **Development:** `11223344` (hardcoded in `AuthManager.kt`)
 **Production:** Will revert to random 32-byte token stored in SharedPreferences.
+
+## Security Features
+
+- **Authentication:** 32-byte random hex token, regeneratable via debug UI
+- **Rate Limiting:** 30 requests/second per IP, sliding window (429 Too Many Requests)
+- **Consent Prompts:** New client IPs require approval via notification (403 Forbidden)
+- **Audit Logging:** All requests logged with timestamp, IP, auth status, method, response code
+- **Client Management:** Approved clients stored in SharedPreferences, removable via debug UI
 
 ## Node Resolution Strategy (Sealed Node Fix)
 
@@ -158,7 +168,6 @@ adb -s <PHONE_IP>:41959 install app/build/outputs/apk/debug/app-debug.apk
 - Autonomous planning inside the app
 - Multiple simultaneous MCP clients
 - Encrypted transport (TLS)
-- Tool call rate limiting
 
 ## CI/CD
 

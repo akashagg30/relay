@@ -1,6 +1,10 @@
 # Relay — MCP Server for Android
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 An MCP relay that turns Android phones into AI-controllable devices. Relay runs as an Android AccessibilityService and exposes phone inspection and control as MCP tools, allowing any AI agent to relay actions to the device.
+
+**Open Source** — Apache 2.0. Free to use, modify, and distribute. Premium features (Relay Cloud, enterprise, managed hosting) will be proprietary.
 
 ## Architecture
 

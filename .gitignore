@@ -1,0 +1,23 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app/build
+
+# Sensitive files
+opencode.json
+*.keystore
+*.jks
+*.env
+*.env.*
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx

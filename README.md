@@ -14,6 +14,18 @@ Relay is an MCP server that lets AI agents explore, interact with, and test Andr
 - **CI/CD integration for mobile QA** — Plug into existing pipelines for automated mobile testing
 - **Accessibility testing via AI** — Agents validate app accessibility with real device interactions
 
+## Why Relay?
+
+Relay is **built specifically for testing**, not general-purpose remote control. While other MCP servers offer 50+ tools for controlling any app, Relay focuses on 14 essential tools optimized for QA workflows.
+
+**Key differentiators:**
+- **Testing-first design** — Every tool is designed for QA use cases
+- **Semantic understanding** — `observe()` tool provides higher-level scene analysis for smarter test automation
+- **Simpler onboarding** — Fewer tools = easier to learn and integrate
+- **CI/CD ready** — Built for automated testing pipelines
+
+If you need general-purpose phone control, there are other options. If you need **reliable, AI-powered testing**, Relay is built for you.
+
 ## Architecture
 
 ```

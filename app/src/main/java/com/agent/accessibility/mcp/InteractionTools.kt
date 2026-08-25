@@ -22,9 +22,8 @@ internal fun McpHandler.clickNode(id: String, args: JSONObject): String {
     val startTime = System.currentTimeMillis()
     val deadline = startTime + CLICK_DEADLINE_MS
 
-    val elementIdRaw = args.optString("elementId", "")
-    val elementId = ElementId.decode(elementIdRaw)
-        ?: return toolErrorResponse(id, "invalid_element_id: \"$elementIdRaw\" is not a valid element id")
+    val (elementId, error) = parseElementId(args, id, this)
+    if (elementId == null) return error!!
 
     val service = AgentAccessibilityService.instance
         ?: return toolErrorResponse(id, "Accessibility service not running")
@@ -296,12 +295,7 @@ private fun McpHandler.bringIntoViewFresh(
         val screenH = metrics.heightPixels
         val screenW = metrics.widthPixels
         val centerX = screenW / 2
-        val scrollDistance = screenH / 3
-        val gestureResult = when (direction) {
-            ScrollDirection.FORWARD -> dispatchScrollGesture(centerX, screenH / 2, centerX, screenH / 2 - scrollDistance, 300)
-            ScrollDirection.BACKWARD -> dispatchScrollGesture(centerX, screenH / 2, centerX, screenH / 2 + scrollDistance, 300)
-            ScrollDirection.UNKNOWN -> false
-        }
+        val gestureResult = performScroll(this, direction, centerX, screenH / 2, screenH)
 
         Thread.sleep(SCROLL_DELAY_MS)
 
@@ -422,12 +416,7 @@ internal fun McpHandler.bringIntoView(
         val screenH = metrics.heightPixels
         val screenW = metrics.widthPixels
         val centerX = screenW / 2
-        val scrollDistance = screenH / 3
-        val gestureResult = when (direction) {
-            ScrollDirection.FORWARD -> dispatchScrollGesture(centerX, screenH / 2, centerX, screenH / 2 - scrollDistance, 300)
-            ScrollDirection.BACKWARD -> dispatchScrollGesture(centerX, screenH / 2, centerX, screenH / 2 + scrollDistance, 300)
-            ScrollDirection.UNKNOWN -> false
-        }
+        val gestureResult = performScroll(this, direction, centerX, screenH / 2, screenH)
 
         Thread.sleep(SCROLL_DELAY_MS)
 
@@ -563,9 +552,8 @@ internal fun McpHandler.swipe(id: String, args: JSONObject): String {
 }
 
 internal fun McpHandler.inputText(id: String, args: JSONObject): String {
-    val elementIdRaw = args.optString("elementId", "")
-    val elementId = ElementId.decode(elementIdRaw)
-        ?: return toolErrorResponse(id, "invalid_element_id: \"$elementIdRaw\" is not a valid element id")
+    val (elementId, error) = parseElementId(args, id, this)
+    if (elementId == null) return error!!
 
     val text = args.optString("text", "")
     if (text.isEmpty()) return toolErrorResponse(id, "Empty text")

@@ -119,7 +119,7 @@ class AppRegistry(private val context: Context) {
         val best = results[0]
         if (results.size == 1) return AppMatch.Single(best.app)
 
-        if (best.score >= 1000) return AppMatch.Single(best.app)
+        if (best.score >= MATCH_THRESHOLD) return AppMatch.Single(best.app)
 
         val secondBest = results[1]
         if (best.score == secondBest.score) {
@@ -235,9 +235,9 @@ object AppMatchScorer {
         val lowerName = appNameLower.lowercase()
         if (lowerQuery.isEmpty() || lowerName.isEmpty()) return 0
 
-        if (lowerName == lowerQuery) return 1000
-        if (lowerName.startsWith(lowerQuery)) return 900 + (lowerQuery.length * 10).coerceAtMost(90)
-        if (lowerName.contains(lowerQuery)) return 800 + (lowerQuery.length * 10).coerceAtMost(90)
+        if (lowerName == lowerQuery) return MATCH_THRESHOLD
+        if (lowerName.startsWith(lowerQuery)) return PREFIX_MATCH_SCORE + (lowerQuery.length * 10).coerceAtMost(90)
+        if (lowerName.contains(lowerQuery)) return CONTAINS_MATCH_SCORE + (lowerQuery.length * 10).coerceAtMost(90)
 
         val fuzzy = computeFuzzyScore(lowerQuery, lowerName)
         if (fuzzy > 0) return fuzzy

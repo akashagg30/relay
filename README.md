@@ -16,7 +16,7 @@ Relay is an MCP server that lets AI agents explore, interact with, and test Andr
 
 ## Why Relay?
 
-Relay is **built specifically for testing**, not general-purpose remote control. While other MCP servers offer 50+ tools for controlling any app, Relay focuses on 14 essential tools optimized for QA workflows.
+Relay is **built specifically for testing**, not general-purpose remote control. While other MCP servers offer 50+ tools for controlling any app, Relay focuses on 17 essential tools optimized for QA workflows.
 
 **Key differentiators:**
 - **Testing-first design** — Every tool is designed for QA use cases
@@ -136,6 +136,14 @@ Response:
 | `home` | — | Performs GLOBAL_ACTION_HOME |
 | `launch_app` | `packageName` | Launches an app by package name |
 | `wait` | `milliseconds` | Waits (max 10s) for UI transitions |
+| `list_apps` | — | Returns launchable applications installed on the device |
+| `search_apps` | `query` | Searches installed applications by name |
+| `open_app` | `name` | Opens an installed application by human-readable name (returns `ambiguous_app` instead of guessing) |
+| `current_app` | — | Returns the currently foreground application |
+| `observe` | — | Returns a semantic representation of the current screen (roles, ids) for cleaner reasoning |
+| `find` | `text`, `role` | Searches the last `observe()` result for a matching element |
+| `scroll_until` | `text`, `direction`, `maxScrolls` | Scrolls until an element with matching text is visible |
+| `diag_sealed` | `elementId` | Diagnostic: tests node sealed lifecycle (development aid) |
 
 ## Example MCP Request
 
@@ -226,10 +234,19 @@ app/src/main/java/com/agent/accessibility/
 ├── controller/
 │   └── AccessibilityController.kt
 ├── mcp/
+│   ├── AppRegistry.kt          # Installed-app registry, search & launch
+│   ├── AuditLogger.kt          # Audit logging of MCP requests
 │   ├── AuthManager.kt          # Token generation & validation
-│   ├── McpHandler.kt           # JSON-RPC tool dispatch
+│   ├── McpHandler.kt           # JSON-RPC protocol dispatch & response framing
 │   ├── McpServerService.kt     # Foreground service + HTTP server
-│   └── NodeResolver.kt         # Stale node resolution
+│   ├── NodeResolver.kt         # Stale node resolution
+│   ├── RateLimiter.kt          # Per-request rate limiting
+│   ├── SemanticProjector.kt    # Projects UI tree to semantic scene
+│   ├── SemanticScene.kt        # Semantic scene data model
+│   ├── ToolRegistry.kt         # MCP tool definitions / schemas (tools/list)
+│   ├── ObservationTools.kt     # get_screen_state, observe, find, scroll_until, diag_sealed
+│   ├── InteractionTools.kt     # click_node, tap, swipe, input_text, back, home
+│   └── AppTools.kt             # launch_app, list_apps, search_apps, open_app, current_app, wait
 ├── model/
 │   └── AccessibilityNodeData.kt
 ├── service/

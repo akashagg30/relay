@@ -38,6 +38,17 @@ jobs:
           path: app/build/reports/lint-results*.html
           retention-days: 7
 
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: app/build/reports/tests/
+          retention-days: 7
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 

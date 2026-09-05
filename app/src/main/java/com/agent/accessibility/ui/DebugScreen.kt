@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agent.accessibility.controller.AccessibilityController
 import com.agent.accessibility.mcp.McpServerService
+import com.agent.accessibility.service.OverlayButtonService
 import com.agent.accessibility.model.SnapshotSource
 import com.agent.accessibility.model.TreeSnapshot
 import kotlinx.coroutines.delay
@@ -46,6 +47,7 @@ fun DebugScreen(controller: AccessibilityController) {
     var auditLogs by remember { mutableStateOf(McpServerService.instance?.getAuditLogs(10) ?: emptyList()) }
     var tunnelRunning by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.isRunning == true) }
     var tunnelUrl by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.publicUrl) }
+    var overlayRunning by remember { mutableStateOf(OverlayButtonService.isRunning) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -59,6 +61,7 @@ fun DebugScreen(controller: AccessibilityController) {
             auditLogs = McpServerService.instance?.getAuditLogs(10) ?: emptyList()
             tunnelRunning = McpServerService.instance?.cloudflareTunnel?.isRunning == true
             tunnelUrl = McpServerService.instance?.cloudflareTunnel?.publicUrl
+            overlayRunning = OverlayButtonService.isRunning
             delay(1000)
         }
     }
@@ -151,6 +154,21 @@ fun DebugScreen(controller: AccessibilityController) {
                     onCopyUrl = { url ->
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("tunnel_url", url))
+                    }
+                )
+            }
+
+            item {
+                OverlayButtonCard(
+                    isOverlayRunning = overlayRunning,
+                    isMcpRunning = isMcpRunning,
+                    onToggleOverlay = {
+                        val intent = Intent(context, OverlayButtonService::class.java)
+                        if (OverlayButtonService.isRunning) {
+                            context.stopService(intent)
+                        } else {
+                            context.startService(intent)
+                        }
                     }
                 )
             }
@@ -475,6 +493,66 @@ fun CloudflareTunnelCard(
                         color = Color(0xFFF44336)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun OverlayButtonCard(
+    isOverlayRunning: Boolean,
+    isMcpRunning: Boolean,
+    onToggleOverlay: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isOverlayRunning) Color(0xFF9C27B0).copy(alpha = 0.15f) else Color(0xFF9E9E9E).copy(alpha = 0.1f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Floating Overlay Button",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = "Status: ${if (isOverlayRunning) "ACTIVE" else "INACTIVE"}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (isOverlayRunning) Color(0xFF9C27B0) else Color(0xFFF44336)
+            )
+
+            Text(
+                text = "Quick toggle for MCP server from any app. Draggable floating button.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onToggleOverlay,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = isMcpRunning,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isOverlayRunning) Color(0xFFF44336) else Color(0xFF9C27B0)
+                )
+            ) {
+                Text(if (isOverlayRunning) "REMOVE OVERLAY" else "SHOW OVERLAY")
+            }
+
+            if (!isMcpRunning) {
+                Text(
+                    text = "Start MCP Server first",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFF44336)
+                )
             }
         }
     }

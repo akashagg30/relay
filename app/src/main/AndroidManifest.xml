@@ -51,6 +51,10 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".service.OverlayButtonService"
+            android:exported="false" />
+
     </application>
 
 </manifest>

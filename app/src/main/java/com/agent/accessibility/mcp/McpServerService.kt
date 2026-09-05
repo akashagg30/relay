@@ -24,6 +24,7 @@ class McpServerService : Service() {
     companion object {
         private const val TAG = "McpServer"
         private const val CHANNEL_ID = "mcp_server_channel"
+        private const val CONSENT_CHANNEL_ID = "mcp_consent_channel"
         private const val NOTIFICATION_ID = 1
         private const val DEFAULT_PORT = 8765
         private const val CONSENT_REQUEST_ID = 2
@@ -60,6 +61,7 @@ class McpServerService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        createNotificationChannels()
         authManager = AuthManager(this)
         mcpHandler = McpHandler(this)
         rateLimiter = RateLimiter()
@@ -68,6 +70,39 @@ class McpServerService : Service() {
         authToken = authManager.token
         cloudflareTunnel = CloudflareTunnel(this)
         Log.d(TAG, "MCP Server service created")
+    }
+
+    /**
+     * Creates all notification channels early in the service lifecycle.
+     * The consent channel uses IMPORTANCE_HIGH so the notification appears
+     * as a heads-up prompt (sound + vibration + heads-up banner).
+     */
+    private fun createNotificationChannels() {
+        val manager = getSystemService(NotificationManager::class.java)
+
+        // Foreground service channel — LOW is fine (persistent, silent)
+        val foregroundChannel = NotificationChannel(
+            CHANNEL_ID,
+            "MCP Server",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Relay MCP Server foreground service"
+        }
+
+        // Consent prompt channel — HIGH so it shows as heads-up with sound
+        val consentChannel = NotificationChannel(
+            CONSENT_CHANNEL_ID,
+            "MCP Client Consent",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Prompts when a new MCP client requests access"
+            enableVibration(true)
+            enableLights(true)
+        }
+
+        manager.createNotificationChannel(foregroundChannel)
+        manager.createNotificationChannel(consentChannel)
+        Log.d(TAG, "Notification channels created (foreground=$CHANNEL_ID, consent=$CONSENT_CHANNEL_ID)")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -211,11 +246,18 @@ class McpServerService : Service() {
 
                 // Consent check for new clients
                 if (!isClientApproved(clientIp)) {
-                    showConsentPrompt(clientIp)
-                    val response = consentRequiredResponse()
-                    auditLogger.logRequest(clientIp, "consent_required", "POST /mcp", 403)
-                    sendHttpResponse(output, response.first, response.second)
-                    return
+                    // Auto-approve local network clients (safe: on same machine or LAN)
+                    if (isLocalNetworkClient(clientIp)) {
+                        approveClient(clientIp)
+                        showInfoNotification(clientIp, true)
+                        Log.d(TAG, "Auto-approved local network client: $clientIp")
+                    } else {
+                        showConsentPrompt(clientIp)
+                        val response = consentRequiredResponse()
+                        auditLogger.logRequest(clientIp, "consent_required", "POST /mcp", 403)
+                        sendHttpResponse(output, response.first, response.second)
+                        return
+                    }
                 }
             }
 
@@ -315,6 +357,14 @@ class McpServerService : Service() {
     }
 
     private fun showConsentPrompt(clientIp: String) {
+        // Check if notifications are allowed (Android 13+ needs runtime permission)
+        if (!canNotify()) {
+            Log.w(TAG, "Notifications not permitted — auto-approving client $clientIp")
+            approveClient(clientIp)
+            showInfoNotification(clientIp, true)
+            return
+        }
+
         val approveIntent = Intent(this, McpServerService::class.java).apply {
             action = "APPROVE_CLIENT"
             putExtra("client_ip", clientIp)
@@ -333,7 +383,7 @@ class McpServerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = Notification.Builder(this, CHANNEL_ID)
+        val notification = Notification.Builder(this, CONSENT_CHANNEL_ID)
             .setContentTitle("New MCP Client Request")
             .setContentText("Client $clientIp wants to connect")
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
@@ -344,10 +394,36 @@ class McpServerService : Service() {
                 null, "Deny", denyPendingIntent
             ).build())
             .setAutoCancel(true)
+            .setPriority(Notification.PRIORITY_HIGH)
+            .setCategory(Notification.CATEGORY_MESSAGE)
             .build()
 
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.notify(CONSENT_REQUEST_ID, notification)
+        Log.d(TAG, "Consent notification posted for $clientIp (channel=$CONSENT_CHANNEL_ID)")
+    }
+
+    /**
+     * Checks whether this app has POST_NOTIFICATIONS permission.
+     * On Android < 13 this always returns true.
+     */
+    private fun canNotify(): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return true
+        return androidx.core.app.ActivityCompat.checkSelfPermission(
+            this, android.Manifest.permission.POST_NOTIFICATIONS
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * Returns true for addresses on the loopback, 10.x, 172.16-31.x, 192.168.x, or link-local ranges.
+     */
+    private fun isLocalNetworkClient(ip: String): Boolean {
+        val clean = ip.removePrefix("::ffff:")
+        return clean == "127.0.0.1" || clean == "::1" ||
+                clean.startsWith("10.") ||
+                clean.startsWith("192.168.") ||
+                clean.matches(Regex("^172\\.(1[6-9]|2\\d|3[01])\\..*")) ||
+                clean.startsWith("169.254.")
     }
 
     private fun showInfoNotification(clientIp: String, autoApproved: Boolean) {
@@ -539,15 +615,9 @@ class McpServerService : Service() {
     }
 
     private fun startForegroundWithNotification() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "MCP Server",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Relay MCP Server"
-        }
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
+        // Channels are created in onCreate() via createNotificationChannels().
+        // Ensure they exist here too (idempotent) in case of race conditions.
+        createNotificationChannels()
 
         val pendingIntent = PendingIntent.getActivity(
             this, 0,

@@ -562,17 +562,17 @@ internal fun McpHandler.inputText(id: String, args: JSONObject): String {
         ?: return toolErrorResponse(id, "Accessibility service not running")
 
     val traversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
-        ?: return toolErrorResponse(id, "element_not_found: element $elementIdRaw could not be resolved")
+        ?: return toolErrorResponse(id, "element_not_found: element $elementId could not be resolved")
 
     return try {
         val node = traversal.matchedNode
         if (!node.isEditable) {
-            toolErrorResponse(id, "Element $elementIdRaw is not editable")
+            toolErrorResponse(id, "Element $elementId is not editable")
         } else {
             val bundle = android.os.Bundle()
             bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             val setResult = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
-            Log.d(TAG, "Input text to element $elementIdRaw: $setResult")
+            Log.d(TAG, "Input text to element $elementId: $setResult")
             toolSuccessResponse(id, JSONObject().apply { put("success", setResult) }.toString())
         }
     } finally {

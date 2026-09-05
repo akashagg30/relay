@@ -44,6 +44,8 @@ fun DebugScreen(controller: AccessibilityController) {
     var authToken by remember { mutableStateOf(McpServerService.authToken) }
     var approvedClients by remember { mutableStateOf(McpServerService.instance?.getApprovedClientsList() ?: emptyList()) }
     var auditLogs by remember { mutableStateOf(McpServerService.instance?.getAuditLogs(10) ?: emptyList()) }
+    var tunnelRunning by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.isRunning == true) }
+    var tunnelUrl by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.publicUrl) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -55,6 +57,8 @@ fun DebugScreen(controller: AccessibilityController) {
             authToken = McpServerService.authToken
             approvedClients = McpServerService.instance?.getApprovedClientsList() ?: emptyList()
             auditLogs = McpServerService.instance?.getAuditLogs(10) ?: emptyList()
+            tunnelRunning = McpServerService.instance?.cloudflareTunnel?.isRunning == true
+            tunnelUrl = McpServerService.instance?.cloudflareTunnel?.publicUrl
             delay(1000)
         }
     }
@@ -119,6 +123,34 @@ fun DebugScreen(controller: AccessibilityController) {
                         val endpoint = "http://$ip:$mcpPort/mcp"
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("mcp_endpoint", endpoint))
+                    }
+                )
+            }
+
+            item {
+                CloudflareTunnelCard(
+                    isTunnelRunning = tunnelRunning,
+                    publicUrl = tunnelUrl,
+                    isMcpRunning = isMcpRunning,
+                    onStartTunnel = {
+                        val intent = Intent(context, McpServerService::class.java).apply {
+                            action = "START_TUNNEL"
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            context.startForegroundService(intent)
+                        } else {
+                            context.startService(intent)
+                        }
+                    },
+                    onStopTunnel = {
+                        val intent = Intent(context, McpServerService::class.java).apply {
+                            action = "STOP_TUNNEL"
+                        }
+                        context.startService(intent)
+                    },
+                    onCopyUrl = { url ->
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("tunnel_url", url))
                     }
                 )
             }
@@ -347,6 +379,98 @@ fun McpServerCard(
                 if (!isAccessibilityEnabled) {
                     Text(
                         text = "Enable Accessibility Service first",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFF44336)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CloudflareTunnelCard(
+    isTunnelRunning: Boolean,
+    publicUrl: String?,
+    isMcpRunning: Boolean,
+    onStartTunnel: () -> Unit,
+    onStopTunnel: () -> Unit,
+    onCopyUrl: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isTunnelRunning) Color(0xFFFF9800).copy(alpha = 0.15f) else Color(0xFF9E9E9E).copy(alpha = 0.1f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Cloudflare Tunnel",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = "Status: ${if (isTunnelRunning) "RUNNING" else "STOPPED"}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (isTunnelRunning) Color(0xFFFF9800) else Color(0xFFF44336)
+            )
+
+            Text(
+                text = "Creates a public HTTPS URL for your MCP server. No Cloudflare account needed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+
+            if (isTunnelRunning && publicUrl != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Public URL:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = publicUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 3
+                )
+                Button(
+                    onClick = { onCopyUrl(publicUrl) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+                ) {
+                    Text("COPY URL")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isTunnelRunning) {
+                Button(
+                    onClick = onStopTunnel,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))
+                ) {
+                    Text("STOP TUNNEL")
+                }
+            } else {
+                Button(
+                    onClick = onStartTunnel,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = isMcpRunning,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+                ) {
+                    Text("START TUNNEL")
+                }
+                if (!isMcpRunning) {
+                    Text(
+                        text = "Start MCP Server first",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFFF44336)
                     )

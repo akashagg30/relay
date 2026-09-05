@@ -39,6 +39,10 @@ android {
         compose = true
     }
 
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+    }
+
     lint {
         abortOnError = true
         checkDependencies = true

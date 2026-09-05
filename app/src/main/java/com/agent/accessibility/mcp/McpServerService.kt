@@ -51,6 +51,10 @@ class McpServerService : Service() {
     private lateinit var consentPrefs: SharedPreferences
     private val executor = Executors.newFixedThreadPool(10)
 
+    // Cloudflare Tunnel
+    var cloudflareTunnel: CloudflareTunnel? = null
+        private set
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -62,6 +66,7 @@ class McpServerService : Service() {
         auditLogger = AuditLogger(this)
         consentPrefs = getSharedPreferences("mcp_consent", Context.MODE_PRIVATE)
         authToken = authManager.token
+        cloudflareTunnel = CloudflareTunnel(this)
         Log.d(TAG, "MCP Server service created")
     }
 
@@ -82,11 +87,15 @@ class McpServerService : Service() {
                     denyClient(clientIp)
                 }
             }
+            "START_TUNNEL" -> startTunnel()
+            "STOP_TUNNEL" -> stopTunnel()
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        cloudflareTunnel?.destroy()
+        cloudflareTunnel = null
         stopServer()
         instance = null
         super.onDestroy()
@@ -127,6 +136,8 @@ class McpServerService : Service() {
     }
 
     fun stopServer() {
+        // Stop tunnel if running (it depends on the MCP server)
+        stopTunnel()
         isRunning = false
         serverThread?.interrupt()
         serverThread = null
@@ -402,6 +413,18 @@ class McpServerService : Service() {
         val approvedClients = getApprovedClients().toMutableSet()
         approvedClients.remove(clientIp)
         saveApprovedClients(approvedClients)
+    }
+
+    fun startTunnel() {
+        if (!isRunning) {
+            Log.w(TAG, "Cannot start tunnel: MCP server not running")
+            return
+        }
+        cloudflareTunnel?.start()
+    }
+
+    fun stopTunnel() {
+        cloudflareTunnel?.stop()
     }
 
     fun regenerateAuthToken(): String {

@@ -77,7 +77,7 @@ class McpHandler(internal val context: Context) {
                 put("tools", JSONObject())
             })
             put("serverInfo", JSONObject().apply {
-                put("name", "android-agent")
+                put("name", "relay")
                 put("version", "2.1.0")
             })
         }

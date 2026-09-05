@@ -69,7 +69,7 @@ fun DebugScreen(controller: AccessibilityController) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Android Agent") },
+                title = { Text("Relay") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),

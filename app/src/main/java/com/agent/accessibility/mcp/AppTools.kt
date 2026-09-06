@@ -157,13 +157,13 @@ internal fun McpHandler.searchInApp(id: String, args: JSONObject): String {
             // Search in specific app
             Intent(Intent.ACTION_SEARCH).apply {
                 setPackage(packageName)
-                putExtra(Intent.EXTRA_SEARCH_QUERY, query)
+                putExtra("query", query)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         } else {
             // Generic web search
             Intent(Intent.ACTION_WEB_SEARCH).apply {
-                putExtra(Intent.EXTRA_SEARCH_QUERY, query)
+                putExtra("query", query)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         }

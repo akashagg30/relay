@@ -119,7 +119,7 @@ private data class ScreenshotResult(
  * Returns null if unavailable or failed.
  */
 @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
-private fun takeScreenshotViaAccessibility(service: AgentAccessibilityService): ScreenshotResult? {
+private fun McpHandler.takeScreenshotViaAccessibility(service: AgentAccessibilityService): ScreenshotResult? {
     val latch = CountDownLatch(1)
     var resultBitmap: Bitmap? = null
     var resultWidth = 0
@@ -259,7 +259,7 @@ private fun drawOverlayFromTree(screenshot: Bitmap, service: AgentAccessibilityS
         setShadowLayer(2f, 1f, 1f, Color.BLACK)
     }
 
-    val rootNode = findForegroundRoot(service) ?: return null
+    val rootNode = service.rootInActiveWindow ?: return null
 
     try {
         val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)

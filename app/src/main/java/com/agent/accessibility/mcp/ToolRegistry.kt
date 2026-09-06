@@ -19,11 +19,11 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
 
     tools.put(toolDef("click_node",
         "PREFERRED for clicking. Clicks an element returned by observe(). " +
-        "Pass the element's `id` exactly as returned. " +
+        "Pass the element's `id` exactly as returned by observe(). " +
         "More reliable than tap() because it uses the accessibility node directly. " +
         "After navigation, call observe() again before clicking.",
         JSONObject().apply {
-            put("elementId", stringParam("Element id from observe (e.g. \"1:7\")"))
+            put("id", stringParam("Element id from observe (e.g. \"1:7\")"))
         }))
 
     tools.put(toolDef("tap",
@@ -44,9 +44,9 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
 
     tools.put(toolDef("input_text",
         "Sets text on an editable element returned by observe(). " +
-        "Pass the element's `id` exactly as returned.",
+        "Pass the element's `id` exactly as returned by observe().",
         JSONObject().apply {
-            put("elementId", stringParam("Element id from observe (e.g. \"1:7\")"))
+            put("id", stringParam("Element id from observe (e.g. \"1:7\")"))
             put("text", stringParam("Text to input"))
         }))
 

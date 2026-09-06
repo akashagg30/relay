@@ -351,7 +351,7 @@ private fun drawOverlayFromTree(screenshot: Bitmap, service: AgentAccessibilityS
  * Count total annotated elements in the current tree.
  */
 private fun countAnnotatedElements(service: AgentAccessibilityService): Int {
-    val rootNode = findForegroundRoot(service) ?: return 0
+    val rootNode = service.rootInActiveWindow ?: return 0
     try {
         val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
         return tree.totalNodeCount

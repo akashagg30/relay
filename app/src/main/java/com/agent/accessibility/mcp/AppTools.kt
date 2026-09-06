@@ -32,7 +32,7 @@ internal fun McpHandler.launchApp(id: String, args: JSONObject): String {
             Log.d(TAG, "Launched $packageName via accessibility service")
             Thread.sleep(500)
             auditLogger.log("launch_app", true, "accessibility", 0,
-                "packageName" to packageName)
+                "packageName" to packageName as Any)
             return toolSuccessResponse(id, JSONObject().apply {
                 put("success", true)
                 put("packageName", packageName)
@@ -50,7 +50,7 @@ internal fun McpHandler.launchApp(id: String, args: JSONObject): String {
         Log.d(TAG, "Launched $packageName via context")
         Thread.sleep(500)
         auditLogger.log("launch_app", true, "context", 0,
-            "packageName" to packageName)
+            "packageName" to packageName as Any)
         return toolSuccessResponse(id, JSONObject().apply {
             put("success", true)
             put("packageName", packageName)

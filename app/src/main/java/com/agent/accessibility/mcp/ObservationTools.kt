@@ -2,6 +2,7 @@ package com.agent.accessibility.mcp
 
 import android.content.Context
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import com.agent.accessibility.service.AgentAccessibilityService
@@ -55,6 +56,8 @@ internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): 
     val activeRoot = service.rootInActiveWindow
     val activePackageName = activeRoot?.packageName?.toString()
 
+    Log.d(TAG, "findForegroundRoot: activeRoot pkg=$activePackageName, windows=${service.windows.size}")
+
     // Check all windows for popups/dialogs from the SAME app
     var popupRoot: AccessibilityNodeInfo? = null
     var popupNodeCount = 0
@@ -64,12 +67,15 @@ internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): 
         if (windowRoot != null &&
             windowRoot.packageName?.toString() != context.packageName
         ) {
+            val windowPkg = windowRoot.packageName?.toString()
             // Only consider popups from the same app as the active window
-            if (activePackageName != null && windowRoot.packageName?.toString() != activePackageName) {
+            if (activePackageName != null && windowPkg != activePackageName) {
+                Log.d(TAG, "  Skipping window pkg=$windowPkg (not same as active $activePackageName)")
                 continue
             }
             // Count nodes to identify popups (smaller window = likely popup)
             val nodeCount = countNodes(windowRoot)
+            Log.d(TAG, "  Window pkg=$windowPkg nodes=$nodeCount same=${windowRoot === activeRoot}")
             if (popupRoot == null || nodeCount < popupNodeCount) {
                 // Skip if this window is the same as active window
                 if (windowRoot !== activeRoot) {
@@ -81,19 +87,25 @@ internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): 
     }
 
     // Return popup if found (smaller window = likely dropdown/dialog)
-    if (popupRoot != null) return popupRoot
+    if (popupRoot != null) {
+        Log.d(TAG, "findForegroundRoot: returning popup pkg=${popupRoot.packageName}")
+        return popupRoot
+    }
 
     if (activeRoot != null && activeRoot.packageName?.toString() != context.packageName) {
+        Log.d(TAG, "findForegroundRoot: returning activeRoot pkg=${activeRoot.packageName}")
         return activeRoot
     }
 
     for (window in service.windows) {
         val windowRoot = window.root
         if (windowRoot != null && windowRoot.packageName?.toString() != context.packageName) {
+            Log.d(TAG, "findForegroundRoot: returning window pkg=${windowRoot.packageName}")
             return windowRoot
         }
     }
 
+    Log.d(TAG, "findForegroundRoot: returning activeRoot (fallback)")
     return activeRoot
 }
 

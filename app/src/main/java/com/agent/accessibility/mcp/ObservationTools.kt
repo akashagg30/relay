@@ -54,29 +54,28 @@ internal fun McpHandler.getScreenState(id: String): String {
 internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): AccessibilityNodeInfo? {
     val activeRoot = service.rootInActiveWindow
 
-    // Check all windows for popups/dialogs first (dropdowns, dialogs, tooltips)
+    // Check all windows for popups/dialogs first
     var popupRoot: AccessibilityNodeInfo? = null
+    var popupNodeCount = 0
+
     for (window in service.windows) {
         val windowRoot = window.root
         if (windowRoot != null &&
             windowRoot.packageName?.toString() != context.packageName
         ) {
-            // Check if this window has a focused element (likely a popup)
-            val focused = windowRoot.findAccessibilityNodeInfosByViewId("android:id/parentPanel")
-            if (focused.isNotEmpty()) {
-                popupRoot = windowRoot
-                break
-            }
-            // Also check for list items (dropdown lists)
-            val listItems = windowRoot.findAccessibilityNodeInfosByViewId("android:id/select_dialog_listview")
-            if (listItems.isNotEmpty()) {
-                popupRoot = windowRoot
-                break
+            // Count nodes to identify popups (smaller window = likely popup)
+            val nodeCount = countNodes(windowRoot)
+            if (popupRoot == null || nodeCount < popupNodeCount) {
+                // Skip if this window is the same as active window
+                if (windowRoot !== activeRoot) {
+                    popupRoot = windowRoot
+                    popupNodeCount = nodeCount
+                }
             }
         }
     }
 
-    // Return popup if found, otherwise return active window
+    // Return popup if found (smaller window = likely dropdown/dialog)
     if (popupRoot != null) return popupRoot
 
     if (activeRoot != null && activeRoot.packageName?.toString() != context.packageName) {
@@ -91,6 +90,18 @@ internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): 
     }
 
     return activeRoot
+}
+
+/**
+ * Count nodes in a tree (for popup detection).
+ */
+private fun countNodes(root: AccessibilityNodeInfo): Int {
+    var count = 1
+    for (i in 0 until root.childCount) {
+        val child = root.getChild(i) ?: continue
+        count += countNodes(child)
+    }
+    return count
 }
 
 /**

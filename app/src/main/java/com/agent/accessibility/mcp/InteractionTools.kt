@@ -93,7 +93,7 @@ private fun McpHandler.attemptClick(
                 val screenW = getScreenWidth()
                 val screenH = getScreenHeight()
                 if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-                    val tapResult = dispatchTap(bounds.centerX(), bounds.centerY())
+                    val tapResult = let (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy)
                     if (tapResult) {
                         Log.d(TAG, "Coordinate fallback succeeded")
                         return toolSuccessResponse(id, JSONObject().apply {
@@ -136,7 +136,7 @@ private fun McpHandler.attemptClick(
 
             val bounds = reTraversal.bounds
             if (NodeResolver.isSaneBounds(bounds)) {
-                val tapResult = dispatchTap(bounds.centerX(), bounds.centerY())
+                val tapResult = let (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy)
                 if (tapResult) {
                     return toolSuccessResponse(id, JSONObject().apply {
                         put("success", true)
@@ -240,7 +240,7 @@ internal fun McpHandler.performClick(
         val screenW = getScreenWidth()
         val screenH = getScreenHeight()
         if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-            val tapResult = dispatchTap(bounds.centerX(), bounds.centerY())
+            val tapResult = let (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy)
             if (tapResult) {
                 Log.d(TAG, "Coordinate fallback succeeded ($method)")
                 return toolSuccessResponse(id, JSONObject().apply {
@@ -488,6 +488,33 @@ internal fun McpHandler.getScreenHeight(): Int {
     @Suppress("DEPRECATION")
     wm.defaultDisplay.getRealMetrics(metrics)
     return metrics.heightPixels
+}
+
+/**
+ * Get status bar height in pixels.
+ */
+private fun getStatusBarHeight(): Int {
+    val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+    return if (resourceId > 0) context.resources.getDimensionPixelSize(resourceId) else 0
+}
+
+/**
+ * Get navigation bar height in pixels.
+ */
+private fun getNavigationBarHeight(): Int {
+    val resourceId = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
+    return if (resourceId > 0) context.resources.getDimensionPixelSize(resourceId) else 0
+}
+
+/**
+ * Convert accessibility bounds center to gesture coordinates.
+ * Accessibility bounds include status bar offset, gesture coordinates don't.
+ */
+private fun boundsToGestureCoords(bounds: Rect): Pair<Int, Int> {
+    val statusBarHeight = getStatusBarHeight()
+    val x = bounds.centerX()
+    val y = bounds.centerY() - statusBarHeight
+    return Pair(x, y.coerceAtLeast(0))
 }
 
 internal fun McpHandler.dispatchTap(x: Int, y: Int): Boolean {

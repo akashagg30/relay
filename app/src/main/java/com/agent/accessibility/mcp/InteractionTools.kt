@@ -493,7 +493,7 @@ internal fun McpHandler.getScreenHeight(): Int {
 /**
  * Get status bar height in pixels.
  */
-private fun getStatusBarHeight(): Int {
+private fun McpHandler.getStatusBarHeight(): Int {
     val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
     return if (resourceId > 0) context.resources.getDimensionPixelSize(resourceId) else 0
 }
@@ -501,7 +501,7 @@ private fun getStatusBarHeight(): Int {
 /**
  * Get navigation bar height in pixels.
  */
-private fun getNavigationBarHeight(): Int {
+private fun McpHandler.getNavigationBarHeight(): Int {
     val resourceId = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
     return if (resourceId > 0) context.resources.getDimensionPixelSize(resourceId) else 0
 }
@@ -510,7 +510,7 @@ private fun getNavigationBarHeight(): Int {
  * Convert accessibility bounds center to gesture coordinates.
  * Accessibility bounds include status bar offset, gesture coordinates don't.
  */
-private fun boundsToGestureCoords(bounds: Rect): Pair<Int, Int> {
+private fun McpHandler.boundsToGestureCoords(bounds: Rect): Pair<Int, Int> {
     val statusBarHeight = getStatusBarHeight()
     val x = bounds.centerX()
     val y = bounds.centerY() - statusBarHeight

@@ -140,7 +140,7 @@ class AppRegistry(private val context: Context) {
     fun launchApp(packageName: String): Boolean {
         val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return false
 
-        // Try accessibility service first (works on MIUI and standard Android)
+        // Try accessibility service first (works on most devices)
         val service = AgentAccessibilityService.instance
         if (service != null) {
             try {
@@ -151,11 +151,27 @@ class AppRegistry(private val context: Context) {
                 Log.d(TAG, "Launched $packageName via accessibility service")
                 return true
             } catch (e: Exception) {
-                Log.w(TAG, "Accessibility launch failed for $packageName, trying context", e)
+                Log.w(TAG, "Accessibility launch failed for $packageName, trying shell", e)
             }
         }
 
-        // Fallback: context.startActivity
+        // Fallback 1: am start via shell (works on MIUI)
+        try {
+            val component = intent.component
+            if (component != null) {
+                val cmd = "am start -n ${component.packageName}/${component.className}"
+                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                val exitCode = process.waitFor()
+                if (exitCode == 0) {
+                    Log.d(TAG, "Launched $packageName via am start")
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Shell launch failed for $packageName, trying context", e)
+        }
+
+        // Fallback 2: context.startActivity
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         return try {
             context.startActivity(intent)

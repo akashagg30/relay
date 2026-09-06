@@ -79,7 +79,7 @@ private fun McpHandler.attemptClick(
 
             if (clickResult) {
                 val total = System.currentTimeMillis() - startTime
-                auditLogger.log("click_node", true, "accessibility_click", total,
+                auditLogger.log("click_node", true, "accessibility_click", total, null,
                     "elementId" to elementId.encode(), "resolutionMethod" to traversal.method)
                 return toolSuccessResponse(id, JSONObject().apply {
                     put("success", true)
@@ -527,7 +527,7 @@ internal fun McpHandler.tap(id: String, args: JSONObject): String {
     val result = service.dispatchGesture(gestureBuilder.build(), null, null)
     val duration = System.currentTimeMillis() - startTime
 
-    auditLogger.log("tap", result, "gesture", duration,
+    auditLogger.log("tap", result, "gesture", duration, null,
         "x" to x, "y" to y)
 
     Log.d(TAG, "Tap at ($x, $y): $result")

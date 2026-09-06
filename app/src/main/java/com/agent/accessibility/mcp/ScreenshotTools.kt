@@ -200,7 +200,7 @@ private fun takeScreenshotViaShell(): ScreenshotResult? {
 /**
  * Get a screenshot bitmap using the best available method.
  */
-private fun takeScreenshotBitmap(service: AgentAccessibilityService): Bitmap? {
+private fun McpHandler.takeScreenshotBitmap(service: AgentAccessibilityService): Bitmap? {
     // Try AccessibilityService.takeScreenshot() first (API 30+)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val result = takeScreenshotViaAccessibility(service)

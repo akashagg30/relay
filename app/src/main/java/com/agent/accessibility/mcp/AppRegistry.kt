@@ -139,30 +139,31 @@ class AppRegistry(private val context: Context) {
 
     fun launchApp(packageName: String): Boolean {
         val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return false
+
+        // Try accessibility service first (works on MIUI and standard Android)
+        val service = AgentAccessibilityService.instance
+        if (service != null) {
+            try {
+                val serviceIntent = Intent(intent).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                }
+                service.startActivity(serviceIntent)
+                Log.d(TAG, "Launched $packageName via accessibility service")
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "Accessibility launch failed for $packageName, trying context", e)
+            }
+        }
+
+        // Fallback: context.startActivity
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         return try {
             context.startActivity(intent)
             Log.d(TAG, "Launched $packageName via context")
             true
         } catch (e: Exception) {
-            // Fallback: try via accessibility service
-            Log.w(TAG, "Context launch failed for $packageName, trying via accessibility", e)
-            try {
-                val service = AgentAccessibilityService.instance
-                if (service != null) {
-                    val serviceIntent = Intent(intent).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    }
-                    service.startActivity(serviceIntent)
-                    Log.d(TAG, "Launched $packageName via accessibility service")
-                    true
-                } else {
-                    false
-                }
-            } catch (e2: Exception) {
-                Log.e(TAG, "Accessibility launch also failed for $packageName", e2)
-                false
-            }
+            Log.e(TAG, "Launch failed for $packageName", e)
+            false
         }
     }
 

@@ -21,37 +21,39 @@ internal fun McpHandler.launchApp(id: String, args: JSONObject): String {
         return toolErrorResponse(id, "Cannot launch $packageName: package not found or has no launch intent")
     }
 
+    // Try accessibility service first (works on MIUI and standard Android)
+    val service = AgentAccessibilityService.instance
+    if (service != null) {
+        try {
+            val serviceIntent = Intent(intent).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            }
+            service.startActivity(serviceIntent)
+            Log.d(TAG, "Launched $packageName via accessibility service")
+            Thread.sleep(500)
+            return toolSuccessResponse(id, JSONObject().apply {
+                put("success", true)
+                put("packageName", packageName)
+                put("method", "accessibility")
+            }.toString())
+        } catch (e: Exception) {
+            Log.w(TAG, "Accessibility launch failed for $packageName, trying context", e)
+        }
+    }
+
+    // Fallback: context.startActivity
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
     try {
         context.startActivity(intent)
         Log.d(TAG, "Launched $packageName via context")
-        // Wait briefly for the app to start
         Thread.sleep(500)
         return toolSuccessResponse(id, JSONObject().apply {
             put("success", true)
             put("packageName", packageName)
+            put("method", "context")
         }.toString())
     } catch (e: Exception) {
-        // Fallback: try via accessibility service's root context
-        Log.w(TAG, "Context launch failed for $packageName, trying via accessibility", e)
-        try {
-            val service = AgentAccessibilityService.instance
-            if (service != null) {
-                val serviceIntent = Intent(intent).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                }
-                service.startActivity(serviceIntent)
-                Log.d(TAG, "Launched $packageName via accessibility service")
-                Thread.sleep(500)
-                return toolSuccessResponse(id, JSONObject().apply {
-                    put("success", true)
-                    put("packageName", packageName)
-                    put("method", "accessibility_fallback")
-                }.toString())
-            }
-        } catch (e2: Exception) {
-            Log.e(TAG, "Accessibility launch also failed for $packageName", e2)
-        }
+        Log.e(TAG, "Launch failed for $packageName", e)
         return toolErrorResponse(id, "Launch failed: ${e.message}")
     }
 }

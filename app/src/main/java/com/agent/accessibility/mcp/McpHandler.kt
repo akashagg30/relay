@@ -78,7 +78,7 @@ class McpHandler(internal val context: Context) {
             })
             put("serverInfo", JSONObject().apply {
                 put("name", "relay")
-                put("version", "2.1.0")
+                put("version", com.agent.accessibility.BuildConfig.APP_VERSION)
             })
         }
         return successResponse(id, result)

@@ -4,6 +4,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Auto-increment versionCode from git commit count
+val commitCount = providers.exec {
+    commandLine("git", "rev-list", "--count", "HEAD")
+}.standardOutput.asText.get().trim().toIntOrNull() ?: 1
+
 android {
     namespace = "com.agent.accessibility"
     compileSdk = 35
@@ -12,8 +17,10 @@ android {
         applicationId = "com.agent.accessibility"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = commitCount
+        versionName = "1.0.$commitCount"
+
+        buildConfigField("String", "APP_VERSION", "\"1.0.$commitCount\"")
     }
 
     buildTypes {
@@ -37,6 +44,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

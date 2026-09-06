@@ -299,11 +299,13 @@ class McpServerService : Service() {
 
     private fun handleHealth(): Triple<Int, String, Boolean> {
         val accessibilityEnabled = isAccessibilityEnabled()
+        val accessibilityRunning = isAccessibilityServiceRunning()
         val foregroundPackage = getForegroundPackage()
 
         val health = JSONObject().apply {
             put("status", "ok")
             put("accessibility", accessibilityEnabled)
+            put("accessibilityRunning", accessibilityRunning)
             put("foregroundPackage", foregroundPackage ?: "unknown")
             put("mcpServer", isRunning)
             put("port", port)
@@ -594,6 +596,14 @@ class McpServerService : Service() {
             android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
         return enabledServices.split(":").any { it.equals(serviceName, ignoreCase = true) }
+    }
+
+    /**
+     * Check if the accessibility service instance is actually running.
+     * This is more reliable than isAccessibilityEnabled() which only checks settings.
+     */
+    private fun isAccessibilityServiceRunning(): Boolean {
+        return com.agent.accessibility.service.AgentAccessibilityService.instance != null
     }
 
     private fun getForegroundPackage(): String? {

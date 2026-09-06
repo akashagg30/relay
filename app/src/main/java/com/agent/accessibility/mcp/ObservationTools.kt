@@ -15,7 +15,7 @@ import org.json.JSONObject
 
 internal fun McpHandler.getScreenState(id: String): String {
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val rootNode = findForegroundRoot(service)
         ?: return toolErrorResponse(id, "No active window")
@@ -145,7 +145,7 @@ private fun McpHandler.flattenForJson(
 
 internal fun McpHandler.observe(id: String): String {
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val rootNode = findForegroundRoot(service)
         ?: return toolErrorResponse(id, "No active window")
@@ -273,7 +273,7 @@ internal fun McpHandler.scrollUntil(id: String, args: JSONObject): String {
     val maxScrolls = args.optInt("maxScrolls", 6)
 
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     var scene = observeInternal(service)
     lastScene = scene
@@ -335,7 +335,7 @@ internal fun McpHandler.diagSealed(id: String, args: JSONObject): String {
 
     val log = mutableListOf<String>()
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     // STEP 1: Walk tree #1, store descriptors, recycle EVERYTHING
     log.add("=== STEP 1: Walk tree #1 ===")

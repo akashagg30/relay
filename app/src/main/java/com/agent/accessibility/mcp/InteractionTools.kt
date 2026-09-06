@@ -26,7 +26,7 @@ internal fun McpHandler.clickNode(id: String, args: JSONObject): String {
     if (elementId == null) return error!!
 
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val firstResult = attemptClick(id, elementId, service, deadline, startTime)
     if (!isErrorResponse(firstResult)) {
@@ -512,7 +512,7 @@ internal fun McpHandler.tap(id: String, args: JSONObject): String {
     if (x < 0 || y < 0) return toolErrorResponse(id, "Invalid coordinates")
 
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val path = Path()
     path.moveTo(x.toFloat(), y.toFloat())
@@ -537,7 +537,7 @@ internal fun McpHandler.swipe(id: String, args: JSONObject): String {
     }
 
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val path = Path()
     path.moveTo(startX.toFloat(), startY.toFloat())
@@ -559,7 +559,7 @@ internal fun McpHandler.inputText(id: String, args: JSONObject): String {
     if (text.isEmpty()) return toolErrorResponse(id, "Empty text")
 
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val traversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
         ?: return toolErrorResponse(id, "element_not_found: element $elementId could not be resolved")
@@ -582,7 +582,7 @@ internal fun McpHandler.inputText(id: String, args: JSONObject): String {
 
 internal fun McpHandler.back(id: String): String {
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val result = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
     Log.d(TAG, "Back: $result")
@@ -591,7 +591,7 @@ internal fun McpHandler.back(id: String): String {
 
 internal fun McpHandler.home(id: String): String {
     val service = AgentAccessibilityService.instance
-        ?: return toolErrorResponse(id, "Accessibility service not running")
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
     val result = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
     Log.d(TAG, "Home: $result")

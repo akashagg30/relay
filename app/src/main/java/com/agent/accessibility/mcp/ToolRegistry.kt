@@ -116,6 +116,18 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "Get aggregate tool usage statistics. Shows success rates, average timing, and methods used per tool.",
         JSONObject()))
 
+    tools.put(toolDef("take_screenshot",
+        "Capture the current screen as a base64-encoded PNG image. " +
+        "Returns the image data, dimensions, and format. " +
+        "Use this to visually inspect what's on screen.",
+        JSONObject()))
+
+    tools.put(toolDef("screenshot_with_overlay",
+        "Take a screenshot AND overlay bounding boxes on all interactive UI elements. " +
+        "Shows element IDs, class names, text content, and clickable indicators. " +
+        "Use this when you need VLM-style visual understanding of the screen with element annotations.",
+        JSONObject()))
+
     return tools
 }
 

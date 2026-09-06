@@ -73,6 +73,13 @@ private fun McpHandler.attemptClick(
     try {
         if (traversal.isVisible) {
             val actionTarget = traversal.clickableAncestor ?: traversal.matchedNode
+
+            // Validate element state before clicking
+            if (!actionTarget.isEnabled) {
+                Log.w(TAG, "[click_node] element is disabled")
+                return toolErrorResponse(id, "element_disabled: the element is not enabled. Check if a prerequisite action is needed first.")
+            }
+
             val clickResult = actionTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             val total = System.currentTimeMillis() - startTime
             Log.d(TAG, "[click_node] total=${total}ms (visible click), result=$clickResult")
@@ -81,10 +88,17 @@ private fun McpHandler.attemptClick(
                 val total = System.currentTimeMillis() - startTime
                 auditLogger.log("click_node", true, "accessibility_click", total, null,
                     "elementId" to elementId.encode(), "resolutionMethod" to traversal.method)
+
+                // Post-click verification: wait briefly and check if screen changed
+                Thread.sleep(300)
+                val newRoot = findForegroundRoot(service)
+                val screenChanged = newRoot != null && newRoot !== traversal.matchedNode
+
                 return toolSuccessResponse(id, JSONObject().apply {
                     put("success", true)
                     put("method", "accessibility_click")
                     put("resolutionMethod", traversal.method)
+                    put("screenChanged", screenChanged)
                 }.toString())
             }
 
@@ -96,9 +110,17 @@ private fun McpHandler.attemptClick(
                     val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
                     if (tapResult) {
                         Log.d(TAG, "Coordinate fallback succeeded")
+                        // Post-click verification
+                        Thread.sleep(300)
+                        val newRoot = findForegroundRoot(service)
+                        val screenChanged = newRoot != null && newRoot !== traversal.matchedNode
+                        if (!screenChanged) {
+                            Log.w(TAG, "Coordinate tap succeeded but screen didn't change")
+                        }
                         return toolSuccessResponse(id, JSONObject().apply {
                             put("success", true)
                             put("method", "coordinate_fallback")
+                            put("screenChanged", screenChanged)
                         }.toString())
                     }
                 }

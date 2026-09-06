@@ -116,6 +116,8 @@ class McpHandler(internal val context: Context) {
             "diag_sealed" -> diagSealed(id, args)
             "get_audit_log" -> getAuditLog(id, args)
             "get_audit_summary" -> getAuditSummary(id)
+            "take_screenshot" -> takeScreenshot(id)
+            "screenshot_with_overlay" -> screenshotWithOverlay(id)
             else -> errorResponse(id, "Unknown tool: $toolName")
         }
     }

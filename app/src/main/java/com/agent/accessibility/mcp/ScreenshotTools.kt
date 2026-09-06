@@ -107,7 +107,7 @@ private data class ScreenshotResult(
     val height: Int
 ) {
     val json: JSONObject get() = JSONObject().apply {
-        put("image", McpHandler.bitmapToBase64(bitmap))
+        put("image", encodeBitmapToBase64(bitmap))
         put("width", width)
         put("height", height)
         put("format", "png")

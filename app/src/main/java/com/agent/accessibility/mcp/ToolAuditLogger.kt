@@ -55,7 +55,7 @@ class ToolAuditLogger(private val context: Context) {
         while (entries.size > MAX_ENTRIES) entries.removeLast()
 
         val status = if (success) "✓" else "✗"
-        val ctx = if (context.isNotEmpty()) " ${contextPairs.joinToString { "${it.first}=${it.second}" }}" else ""
+        val ctx = if (contextPairs.isNotEmpty()) " ${contextPairs.joinToString { "${it.first}=${it.second}" }}" else ""
         Log.d(TAG, "$status $tool ${method ?: ""} ${durationMs}ms${if (error != null) " err=$error" else ""}$ctx")
     }
 

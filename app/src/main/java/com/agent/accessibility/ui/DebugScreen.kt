@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agent.accessibility.controller.AccessibilityController
 import com.agent.accessibility.mcp.McpServerService
+import com.agent.accessibility.mcp.MiuiPermissionHelper
 import com.agent.accessibility.service.OverlayButtonService
 import com.agent.accessibility.model.SnapshotSource
 import com.agent.accessibility.model.TreeSnapshot
@@ -48,8 +49,13 @@ fun DebugScreen(controller: AccessibilityController) {
     var tunnelRunning by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.isRunning == true) }
     var tunnelUrl by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.publicUrl) }
     var overlayRunning by remember { mutableStateOf(OverlayButtonService.isRunning) }
+    var isMiui by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        isMiui = MiuiPermissionHelper.isMiui(context)
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -93,6 +99,16 @@ fun DebugScreen(controller: AccessibilityController) {
                     isEnabled = isServiceEnabled,
                     onOpenSettings = { controller.openAccessibilitySettings() }
                 )
+            }
+
+            if (isMiui) {
+                item {
+                    MiuiPermissionCard(
+                        onOpenSettings = {
+                            MiuiPermissionHelper.openPermissionSettings(context)
+                        }
+                    )
+                }
             }
 
             item {
@@ -553,6 +569,47 @@ fun OverlayButtonCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFF44336)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun MiuiPermissionCard(
+    onOpenSettings: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFFF9800).copy(alpha = 0.15f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "⚠️ MIUI Detected",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFE65100)
+            )
+
+            Text(
+                text = "MIUI blocks apps from starting activities in background. Enable 'Start in background' permission for Relay to launch other apps.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onOpenSettings,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+            ) {
+                Text("OPEN MIUI PERMISSIONS")
             }
         }
     }

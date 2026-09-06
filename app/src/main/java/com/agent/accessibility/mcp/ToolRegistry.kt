@@ -77,6 +77,16 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         JSONObject().apply {
             put("name", stringParam("Application name (e.g. Chrome, WhatsApp, Maps)"))
         }))
+
+    tools.put(toolDef("search_in_app",
+        "Search within an app using intent. Bypasses hidden EditText widgets. " +
+        "Works for Play Store, Chrome, Settings, and other apps that support search intents. " +
+        "If packageName is empty, performs a generic web search.",
+        JSONObject().apply {
+            put("query", stringParam("Search query text"))
+            put("packageName", stringParam("App package name (optional, e.g. com.android.vending for Play Store)"))
+        }))
+
     tools.put(toolDef("current_app",
         "Returns the currently foreground application.",
         JSONObject()))

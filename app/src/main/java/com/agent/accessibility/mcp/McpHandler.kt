@@ -109,6 +109,7 @@ class McpHandler(internal val context: Context) {
             "list_apps" -> listApps(id)
             "search_apps" -> searchApps(id, args)
             "open_app" -> openApp(id, args)
+            "search_in_app" -> searchInApp(id, args)
             "current_app" -> currentApp(id)
             "observe" -> observe(id)
             "find" -> find(id, args)

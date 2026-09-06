@@ -28,6 +28,7 @@ internal const val CLICK_DEADLINE_MS = 4000L
 class McpHandler(internal val context: Context) {
 
     internal val appRegistry = AppRegistry(context)
+    internal val auditLogger = ToolAuditLogger(context)
 
     // Cached observation state shared by observe / find / scroll_until.
     @Volatile internal var lastObserveTimestamp = 0L
@@ -113,6 +114,8 @@ class McpHandler(internal val context: Context) {
             "find" -> find(id, args)
             "scroll_until" -> scrollUntil(id, args)
             "diag_sealed" -> diagSealed(id, args)
+            "get_audit_log" -> getAuditLog(id, args)
+            "get_audit_summary" -> getAuditSummary(id)
             else -> errorResponse(id, "Unknown tool: $toolName")
         }
     }
@@ -169,5 +172,18 @@ class McpHandler(internal val context: Context) {
                 put("message", message)
             })
         }.toString()
+    }
+
+    internal fun getAuditLog(id: String, args: JSONObject): String {
+        val limit = args.optInt("limit", 20).coerceIn(1, 100)
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("entries", org.json.JSONArray(auditLogger.getRecentJson(limit)))
+        }.toString())
+    }
+
+    internal fun getAuditSummary(id: String): String {
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("summary", auditLogger.getSummary())
+        }.toString())
     }
 }

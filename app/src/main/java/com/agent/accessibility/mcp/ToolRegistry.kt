@@ -98,8 +98,19 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
     tools.put(toolDef("diag_sealed",
         "DIAGNOSTIC: Tests node sealed lifecycle. Walk tree, recycle all, re-walk, try performAction.",
         JSONObject().apply {
-            put("elementId", stringParam("Element id from get_screen_state (e.g. \"24:86\")"))
+            put("elementId", stringParam("Element id from get_screen_state (e.g. \\\"24:86\\\")"))
         }))
+
+    tools.put(toolDef("get_audit_log",
+        "Get recent MCP tool call audit log. Shows success/failure, method used, timing. " +
+        "Use for debugging tool reliability issues.",
+        JSONObject().apply {
+            put("limit", intParam("Number of recent entries (default 20, max 100)"))
+        }))
+
+    tools.put(toolDef("get_audit_summary",
+        "Get aggregate tool usage statistics. Shows success rates, average timing, and methods used per tool.",
+        JSONObject()))
 
     return tools
 }

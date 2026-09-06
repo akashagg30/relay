@@ -97,25 +97,16 @@ class McpHandler(internal val context: Context) {
         Log.d(TAG, "Tool call: $toolName")
 
         return when (toolName) {
-            "get_screen_state" -> getScreenState(id)
+            "observe" -> observe(id)
             "click_node" -> clickNode(id, args)
-            "tap" -> tap(id, args)
-            "swipe" -> swipe(id, args)
             "input_text" -> inputText(id, args)
+            "swipe" -> swipe(id, args)
             "back" -> back(id)
             "home" -> home(id)
-            "launch_app" -> launchApp(id, args)
-            "wait" -> wait(id, args)
-            "list_apps" -> listApps(id)
-            "search_apps" -> searchApps(id, args)
-            "open_app" -> openApp(id, args)
-            "current_app" -> currentApp(id)
-            "observe" -> observe(id)
             "find" -> find(id, args)
             "scroll_until" -> scrollUntil(id, args)
-            "diag_sealed" -> diagSealed(id, args)
-            "get_audit_log" -> getAuditLog(id, args)
-            "get_audit_summary" -> getAuditSummary(id)
+            "current_app" -> currentApp(id)
+            "open_app" -> openApp(id, args)
             else -> errorResponse(id, "Unknown tool: $toolName")
         }
     }
@@ -172,18 +163,5 @@ class McpHandler(internal val context: Context) {
                 put("message", message)
             })
         }.toString()
-    }
-
-    internal fun getAuditLog(id: String, args: JSONObject): String {
-        val limit = args.optInt("limit", 20).coerceIn(1, 100)
-        return toolSuccessResponse(id, JSONObject().apply {
-            put("entries", org.json.JSONArray(auditLogger.getRecentJson(limit)))
-        }.toString())
-    }
-
-    internal fun getAuditSummary(id: String): String {
-        return toolSuccessResponse(id, JSONObject().apply {
-            put("summary", auditLogger.getSummary())
-        }.toString())
     }
 }

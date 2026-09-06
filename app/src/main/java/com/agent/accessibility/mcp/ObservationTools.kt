@@ -53,8 +53,9 @@ internal fun McpHandler.getScreenState(id: String): String {
 
 internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): AccessibilityNodeInfo? {
     val activeRoot = service.rootInActiveWindow
+    val activePackageName = activeRoot?.packageName?.toString()
 
-    // Check all windows for popups/dialogs first
+    // Check all windows for popups/dialogs from the SAME app
     var popupRoot: AccessibilityNodeInfo? = null
     var popupNodeCount = 0
 
@@ -63,6 +64,10 @@ internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): 
         if (windowRoot != null &&
             windowRoot.packageName?.toString() != context.packageName
         ) {
+            // Only consider popups from the same app as the active window
+            if (activePackageName != null && windowRoot.packageName?.toString() != activePackageName) {
+                continue
+            }
             // Count nodes to identify popups (smaller window = likely popup)
             val nodeCount = countNodes(windowRoot)
             if (popupRoot == null || nodeCount < popupNodeCount) {

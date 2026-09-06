@@ -94,7 +94,7 @@ class McpHandler(internal val context: Context) {
         val toolName = params.optString("name", "")
         val args = params.optJSONObject("arguments") ?: JSONObject()
 
-        Log.d(TAG, "Tool call: $toolName")
+        Log.d(TAG, "Tool call: $toolName args=${args.toString().take(200)}")
 
         return when (toolName) {
             "get_screen_state" -> getScreenState(id)

@@ -27,6 +27,7 @@ internal fun parseElementId(
     handler: McpHandler
 ): Pair<ElementId?, String?> {
     val raw = args.optString("id", args.optString("elementId", ""))
+    Log.d(TAG, "parseElementId: raw='$raw' keys=${args.keys().asSequence().toList()}")
     val decoded = ElementId.decode(raw)
     if (decoded == null) {
         return null to handler.toolErrorResponse(id, "invalid_element_id: \"$raw\" is not a valid element id")

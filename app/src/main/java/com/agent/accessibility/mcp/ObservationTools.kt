@@ -52,10 +52,35 @@ internal fun McpHandler.getScreenState(id: String): String {
 }
 
 internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): AccessibilityNodeInfo? {
-    val root = service.rootInActiveWindow
+    val activeRoot = service.rootInActiveWindow
 
-    if (root != null && root.packageName?.toString() != context.packageName) {
-        return root
+    // Check all windows for popups/dialogs first (dropdowns, dialogs, tooltips)
+    var popupRoot: AccessibilityNodeInfo? = null
+    for (window in service.windows) {
+        val windowRoot = window.root
+        if (windowRoot != null &&
+            windowRoot.packageName?.toString() != context.packageName
+        ) {
+            // Check if this window has a focused element (likely a popup)
+            val focused = windowRoot.findAccessibilityNodeInfosByViewId("android:id/parentPanel")
+            if (focused.isNotEmpty()) {
+                popupRoot = windowRoot
+                break
+            }
+            // Also check for list items (dropdown lists)
+            val listItems = windowRoot.findAccessibilityNodeInfosByViewId("android:id/select_dialog_listview")
+            if (listItems.isNotEmpty()) {
+                popupRoot = windowRoot
+                break
+            }
+        }
+    }
+
+    // Return popup if found, otherwise return active window
+    if (popupRoot != null) return popupRoot
+
+    if (activeRoot != null && activeRoot.packageName?.toString() != context.packageName) {
+        return activeRoot
     }
 
     for (window in service.windows) {
@@ -65,7 +90,34 @@ internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): 
         }
     }
 
-    return root
+    return activeRoot
+}
+
+/**
+ * Find all accessible windows including popups (dropdowns, dialogs).
+ * Returns list of roots from all non-Relay windows.
+ */
+internal fun McpHandler.findAllWindowRoots(service: AgentAccessibilityService): List<AccessibilityNodeInfo> {
+    val roots = mutableListOf<AccessibilityNodeInfo>()
+
+    // Add active window first
+    val activeRoot = service.rootInActiveWindow
+    if (activeRoot != null && activeRoot.packageName?.toString() != context.packageName) {
+        roots.add(activeRoot)
+    }
+
+    // Add all other windows (popups, dialogs, etc.)
+    for (window in service.windows) {
+        val windowRoot = window.root
+        if (windowRoot != null &&
+            windowRoot.packageName?.toString() != context.packageName &&
+            !roots.any { it === windowRoot }
+        ) {
+            roots.add(windowRoot)
+        }
+    }
+
+    return roots
 }
 
 private fun McpHandler.flattenForJson(

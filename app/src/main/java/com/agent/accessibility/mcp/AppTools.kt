@@ -37,32 +37,11 @@ internal fun McpHandler.launchApp(id: String, args: JSONObject): String {
                 put("method", "accessibility")
             }.toString())
         } catch (e: Exception) {
-            Log.w(TAG, "Accessibility launch failed for $packageName, trying shell", e)
+            Log.w(TAG, "Accessibility launch failed for $packageName, trying context", e)
         }
     }
 
-    // Fallback 1: am start via shell (works on MIUI)
-    try {
-        val component = intent.component
-        if (component != null) {
-            val cmd = "am start -n ${component.packageName}/${component.className}"
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            val exitCode = process.waitFor()
-            if (exitCode == 0) {
-                Log.d(TAG, "Launched $packageName via am start")
-                Thread.sleep(500)
-                return toolSuccessResponse(id, JSONObject().apply {
-                    put("success", true)
-                    put("packageName", packageName)
-                    put("method", "shell")
-                }.toString())
-            }
-        }
-    } catch (e: Exception) {
-        Log.w(TAG, "Shell launch failed for $packageName, trying context", e)
-    }
-
-    // Fallback 2: context.startActivity
+    // Fallback: context.startActivity
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
     try {
         context.startActivity(intent)

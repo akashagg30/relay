@@ -89,10 +89,12 @@ private fun McpHandler.attemptClick(
                 auditLogger.log("click_node", true, "accessibility_click", total, null,
                     "elementId" to elementId.encode(), "resolutionMethod" to traversal.method)
 
-                // Post-click verification: wait briefly and check if screen changed
+                // Post-click verification: compare package name to detect screen change
                 Thread.sleep(300)
                 val newRoot = findForegroundRoot(service)
-                val screenChanged = newRoot != null && newRoot !== traversal.matchedNode
+                val oldPkg = traversal.matchedNode?.packageName?.toString()
+                val newPkg = newRoot?.packageName?.toString()
+                val screenChanged = newPkg != null && newPkg != oldPkg
 
                 return toolSuccessResponse(id, JSONObject().apply {
                     put("success", true)
@@ -113,7 +115,9 @@ private fun McpHandler.attemptClick(
                         // Post-click verification
                         Thread.sleep(300)
                         val newRoot = findForegroundRoot(service)
-                        val screenChanged = newRoot != null && newRoot !== traversal.matchedNode
+                        val oldPkg = traversal.matchedNode?.packageName?.toString()
+                        val newPkg = newRoot?.packageName?.toString()
+                        val screenChanged = newPkg != null && newPkg != oldPkg
                         if (!screenChanged) {
                             Log.w(TAG, "Coordinate tap succeeded but screen didn't change")
                         }

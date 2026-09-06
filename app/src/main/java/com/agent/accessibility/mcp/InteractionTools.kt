@@ -93,7 +93,7 @@ private fun McpHandler.attemptClick(
                 val screenW = getScreenWidth()
                 val screenH = getScreenHeight()
                 if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-                    val tapResult = let (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy)
+                    val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
                     if (tapResult) {
                         Log.d(TAG, "Coordinate fallback succeeded")
                         return toolSuccessResponse(id, JSONObject().apply {
@@ -136,7 +136,7 @@ private fun McpHandler.attemptClick(
 
             val bounds = reTraversal.bounds
             if (NodeResolver.isSaneBounds(bounds)) {
-                val tapResult = let (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy)
+                val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
                 if (tapResult) {
                     return toolSuccessResponse(id, JSONObject().apply {
                         put("success", true)
@@ -240,7 +240,7 @@ internal fun McpHandler.performClick(
         val screenW = getScreenWidth()
         val screenH = getScreenHeight()
         if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-            val tapResult = let (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy)
+            val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
             if (tapResult) {
                 Log.d(TAG, "Coordinate fallback succeeded ($method)")
                 return toolSuccessResponse(id, JSONObject().apply {

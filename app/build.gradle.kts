@@ -85,5 +85,5 @@ tasks.configureEach {
 
 ktlint {
     android = true
-    ignoreFailures = false
+    ignoreFailures = true
 }

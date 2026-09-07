@@ -564,8 +564,6 @@ class McpServerService : Service() {
         startForegroundWithNotification()
     }
 
-    }
-
     fun regenerateAuthToken(): String {
         val newToken = authManager.regenerateToken()
         authToken = newToken

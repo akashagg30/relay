@@ -745,16 +745,21 @@ class NodeResolverTest {
 
     @Test
     fun `snapshot manager keeps bounded cache`() {
-        val ids = (1..15).map { i ->
+        // Store more than MAX_SNAPSHOTS (50) to trigger eviction
+        val ids = (1..55).map { i ->
             snapshotManager.store(
                 mapOf(i to makeDescriptor(id = i, text = "Item $i")),
                 "com.example"
             )
         }
 
+        // First 5 should be evicted (55 - 50 = 5 evicted)
         assertNull(snapshotManager.getDescriptor(ids[0], 1))
-        assertNull(snapshotManager.getDescriptor(ids[1], 2))
-        assertNotNull(snapshotManager.getDescriptor(ids[14], 15))
+        assertNull(snapshotManager.getDescriptor(ids[4], 5))
+        // 6th should still exist
+        assertNotNull(snapshotManager.getDescriptor(ids[5], 6))
+        // Last should exist
+        assertNotNull(snapshotManager.getDescriptor(ids[54], 55))
     }
 
     @Test

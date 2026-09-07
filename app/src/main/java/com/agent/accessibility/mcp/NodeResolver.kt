@@ -136,7 +136,7 @@ data class ClickResult(
 
 class SnapshotManager {
     companion object {
-        private const val MAX_SNAPSHOTS = 10
+        private const val MAX_SNAPSHOTS = 50
     }
 
     private data class SnapshotEntry(

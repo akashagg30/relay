@@ -134,6 +134,15 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "Check if cloud log sync is enabled.",
         JSONObject()))
 
+    tools.put(toolDef("set_sync_endpoint",
+        "Set the cloud sync endpoint URL. Logs will be synced to this URL when sync is enabled.",
+        JSONObject().apply {
+            put("url", JSONObject().apply {
+                put("type", "string")
+                put("description", "Endpoint URL for log sync (e.g. http://100.x.x.x:8080/logs)")
+            })
+        }))
+
     tools.put(toolDef("take_screenshot",
         "Capture the current screen as a base64-encoded PNG image. " +
         "Returns the image data, dimensions, and format. " +

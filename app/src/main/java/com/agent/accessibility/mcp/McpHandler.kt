@@ -120,6 +120,7 @@ class McpHandler(internal val context: Context) {
             "get_audit_summary" -> getAuditSummary(id)
             "set_log_sync" -> setLogSync(id, args)
             "get_log_sync" -> getLogSync(id)
+            "set_sync_endpoint" -> setSyncEndpoint(id, args)
             "take_screenshot" -> takeScreenshot(id)
             "screenshot_with_overlay" -> screenshotWithOverlay(id)
             else -> errorResponse(id, "Unknown tool: $toolName")
@@ -196,6 +197,14 @@ class McpHandler(internal val context: Context) {
     }
 
     internal fun getLogSync(id: String): String {
+    internal fun setSyncEndpoint(id: String, args: JSONObject): String {
+        val url = args.optString("url", "")
+        if (url.isEmpty()) return toolErrorResponse(id, "Empty URL")
+        localLogStore.setSyncEndpoint(url)
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("endpoint", localLogStore.getSyncEndpoint())
+        }.toString())
+    }
         return toolSuccessResponse(id, JSONObject().apply {
             put("syncEnabled", localLogStore.isSyncEnabled())
         }.toString())

@@ -10,15 +10,16 @@ import java.util.*
 import java.util.concurrent.ConcurrentLinkedDeque
 
 /**
- * Local log storage for MCP tool calls.
+ * Local log storage for MCP tool calls with daily rotation.
  * Always stores locally. Optional sync to cloud for debugging.
  */
 class LocalLogStore(private val context: Context) {
 
     companion object {
         private const val TAG = "LocalLogStore"
-        private const val MAX_LOCAL_ENTRIES = 1000
-        private const val LOG_FILE = "mcp_logs.json"
+        private const val MAX_ENTRIES_PER_DAY = 5000
+        private const val MAX_ROTATION_DAYS = 7
+        private const val LOG_DIR = "mcp_logs"
     }
 
     data class LogEntry(
@@ -32,10 +33,12 @@ class LocalLogStore(private val context: Context) {
     )
 
     private val entries = ConcurrentLinkedDeque<LogEntry>()
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     init {
-        loadFromFile()
+        loadTodayLogs()
+        cleanupOldLogs()
     }
 
     /**
@@ -59,11 +62,15 @@ class LocalLogStore(private val context: Context) {
             context = contextPairs.toMap()
         )
         entries.addFirst(entry)
-        while (entries.size > MAX_LOCAL_ENTRIES) entries.removeLast()
 
-        // Save to file periodically (every 10 entries)
-        if (entries.size % 10 == 0) {
-            saveToFile()
+        // Rotate if too many entries today
+        if (entries.size > MAX_ENTRIES_PER_DAY) {
+            rotateTodayLogs()
+        }
+
+        // Save periodically (every 20 entries)
+        if (entries.size % 20 == 0) {
+            saveTodayLogs()
         }
 
         val status = if (success) "✓" else "✗"
@@ -76,7 +83,7 @@ class LocalLogStore(private val context: Context) {
     fun getRecentJson(limit: Int = 50): String {
         val array = JSONArray()
         entries.take(limit).forEach { entry ->
-            val time = dateFormat.format(Date(entry.timestamp))
+            val time = timestampFormat.format(Date(entry.timestamp))
             array.put(JSONObject().apply {
                 put("time", time)
                 put("tool", entry.tool)
@@ -84,6 +91,27 @@ class LocalLogStore(private val context: Context) {
                 put("ms", entry.durationMs)
                 entry.method?.let { put("method", it) }
                 entry.error?.let { put("error", it) }
+                if (entry.context.isNotEmpty()) {
+                    put("ctx", JSONObject(entry.context))
+                }
+            })
+        }
+        return array.toString()
+    }
+
+    /**
+     * Get all logs for today as JSON (for sync).
+     */
+    fun getTodayLogsJson(): String {
+        val array = JSONArray()
+        entries.forEach { entry ->
+            array.put(JSONObject().apply {
+                put("t", entry.timestamp)
+                put("tool", entry.tool)
+                put("ok", entry.success)
+                entry.method?.let { put("m", it) }
+                put("ms", entry.durationMs)
+                entry.error?.let { put("err", it) }
                 if (entry.context.isNotEmpty()) {
                     put("ctx", JSONObject(entry.context))
                 }
@@ -135,28 +163,39 @@ class LocalLogStore(private val context: Context) {
     }
 
     /**
-     * Get unsynced entries for cloud upload.
+     * Get sync endpoint URL.
      */
-    fun getUnsyncedEntries(): List<LogEntry> {
+    fun getSyncEndpoint(): String {
         val prefs = context.getSharedPreferences("mcp_logs", Context.MODE_PRIVATE)
-        val lastSync = prefs.getLong("last_sync_timestamp", 0)
-        return entries.filter { it.timestamp > lastSync }.toList()
+        return prefs.getString("sync_endpoint", "") ?: ""
     }
 
     /**
-     * Mark entries as synced.
+     * Set sync endpoint URL.
      */
-    fun markSynced(timestamp: Long) {
+    fun setSyncEndpoint(endpoint: String) {
         val prefs = context.getSharedPreferences("mcp_logs", Context.MODE_PRIVATE)
-        prefs.edit().putLong("last_sync_timestamp", timestamp).apply()
+        prefs.edit().putString("sync_endpoint", endpoint).apply()
+        Log.d(TAG, "Sync endpoint set: $endpoint")
     }
 
     /**
-     * Save logs to file.
+     * Rotate today's logs to a dated file.
      */
-    private fun saveToFile() {
+    private fun rotateTodayLogs() {
+        saveTodayLogs()
+        entries.clear()
+    }
+
+    /**
+     * Save today's logs to a dated file.
+     */
+    private fun saveTodayLogs() {
         try {
-            val file = File(context.filesDir, LOG_FILE)
+            val logDir = File(context.filesDir, LOG_DIR)
+            logDir.mkdirs()
+            val today = dateFormat.format(Date())
+            val file = File(logDir, "$today.json")
             val array = JSONArray()
             entries.forEach { entry ->
                 array.put(JSONObject().apply {
@@ -178,11 +217,14 @@ class LocalLogStore(private val context: Context) {
     }
 
     /**
-     * Load logs from file.
+     * Load today's logs from file.
      */
-    private fun loadFromFile() {
+    private fun loadTodayLogs() {
         try {
-            val file = File(context.filesDir, LOG_FILE)
+            val logDir = File(context.filesDir, LOG_DIR)
+            if (!logDir.exists()) return
+            val today = dateFormat.format(Date())
+            val file = File(logDir, "$today.json")
             if (!file.exists()) return
             val text = file.readText()
             val array = JSONArray(text)
@@ -197,9 +239,31 @@ class LocalLogStore(private val context: Context) {
                     error = obj.optString("err", null)
                 ))
             }
-            Log.d(TAG, "Loaded ${entries.size} log entries from file")
+            Log.d(TAG, "Loaded ${entries.size} log entries for today")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load logs", e)
+        }
+    }
+
+    /**
+     * Cleanup old log files (keep last 7 days).
+     */
+    private fun cleanupOldLogs() {
+        try {
+            val logDir = File(context.filesDir, LOG_DIR)
+            if (!logDir.exists()) return
+            val cutoff = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, -MAX_ROTATION_DAYS)
+            }.time
+            val cutoffStr = dateFormat.format(cutoff)
+            logDir.listFiles()?.forEach { file ->
+                if (file.name.endsWith(".json") && file.name < cutoffStr) {
+                    file.delete()
+                    Log.d(TAG, "Deleted old log: ${file.name}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to cleanup old logs", e)
         }
     }
 
@@ -208,7 +272,8 @@ class LocalLogStore(private val context: Context) {
      */
     fun clear() {
         entries.clear()
-        saveToFile()
-        Log.d(TAG, "Logs cleared")
+        val logDir = File(context.filesDir, LOG_DIR)
+        logDir.deleteRecursively()
+        Log.d(TAG, "All logs cleared")
     }
 }

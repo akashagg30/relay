@@ -250,7 +250,7 @@ internal fun McpHandler.observe(id: String): String {
         if (projectedCount == 0 && rawNodeCount > 0) {
             // Build a simple list from raw nodes (like get_screen_state)
             val nodesArray = JSONArray()
-            flattenForJson(tree.root ?: rootNode, null, nodesArray, snapshotId)
+            tree.root?.let { flattenForJson(it, null, nodesArray, snapshotId) }
             val fallbackJson = JSONObject()
             fallbackJson.put("packageName", tree.foregroundPackage ?: "unknown")
             fallbackJson.put("snapshotId", snapshotId)

@@ -538,7 +538,7 @@ class McpServerService : Service() {
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
                         Log.d(TAG, "cloudflared: $line")
-                        val match = Regex("https://[a-zA-Z0-9-]+\.trycloudflare\.com").find(line ?: "")
+                        val match = line?.let { Regex("https://[a-zA-Z0-9-]+\.trycloudflare\.com").find(it) }
                         if (match != null) {
                             cloudflaredUrl = match.value
                             Log.d(TAG, "Tunnel URL: $cloudflaredUrl")

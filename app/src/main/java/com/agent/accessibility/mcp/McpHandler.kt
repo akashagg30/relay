@@ -34,6 +34,7 @@ class McpHandler(internal val context: Context) {
     @Volatile internal var lastObserveTimestamp = 0L
     @Volatile internal var lastElementCount = 0
     @Volatile internal var lastScene: SemanticScene? = null
+    @Volatile internal var observeFallbackCount = 0
 
     fun init() {
         appRegistry.register()

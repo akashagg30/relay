@@ -86,6 +86,12 @@ object SemanticProjector {
         screenHeight: Int,
         screenWidth: Int
     ): SemanticElement? {
+        // Debug: log clickable empty nodes (dialog buttons)
+        val shortClassName = node.className?.substringAfterLast('.') ?: ""
+        if (node.clickable && node.text.isNullOrBlank() && node.contentDescription.isNullOrBlank() && node.children.isNotEmpty()) {
+            Log.d(TAG, "projectNode: clickable empty layout [$snapshotId:${node.nodeId}] class=$shortClassName children=${node.children.size}")
+        }
+
         // Skip decorative images (no text, no description, not clickable)
         if (isDecorativeImage(node)) return null
 

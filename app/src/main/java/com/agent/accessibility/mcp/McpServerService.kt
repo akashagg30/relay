@@ -308,6 +308,7 @@ class McpServerService : Service() {
             put("accessibilityRunning", accessibilityRunning)
             put("foregroundPackage", foregroundPackage ?: "unknown")
             put("mcpServer", isRunning)
+            put("observeFallbackCount", mcpHandler.observeFallbackCount)
             put("port", port)
         }
         return Triple(200, health.toString(), false)

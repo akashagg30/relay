@@ -263,7 +263,8 @@ internal fun McpHandler.observe(id: String): String {
                 put("keyboardVisible", false)
                 put("dialogVisible", true)
             })
-            Log.d(TAG, "observe: projected=0 raw=$rawNodeCount, falling back to raw nodes")
+            observeFallbackCount++
+            Log.d(TAG, "observe: projected=0 raw=$rawNodeCount, falling back to raw nodes (fallback #$observeFallbackCount)")
             return toolSuccessResponse(id, fallbackJson.toString())
         }
 

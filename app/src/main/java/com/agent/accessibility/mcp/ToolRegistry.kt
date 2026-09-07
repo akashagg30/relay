@@ -117,35 +117,7 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         }))
 
     tools.put(toolDef("get_audit_summary",
-
-    tools.put(toolDef("set_log_sync",
-        "Enable or disable cloud log sync. When enabled, logs are sent to the developer for debugging. " +
-        "User must explicitly enable this. Logs are always stored locally regardless.",
-        JSONObject().apply {
-            put("enabled", JSONObject().apply {
-                put("type", "boolean")
-                put("description", "true to enable sync, false to disable")
-            })
-        }))
-
-    tools.put(toolDef("get_log_sync",
-        "Check if cloud log sync is enabled.",
-        JSONObject()))
         "Get aggregate tool usage statistics. Shows success rates, average timing, and methods used per tool.",
-
-    tools.put(toolDef("set_log_sync",
-        "Enable or disable cloud log sync. When enabled, logs are sent to the developer for debugging. " +
-        "User must explicitly enable this. Logs are always stored locally regardless.",
-        JSONObject().apply {
-            put("enabled", JSONObject().apply {
-                put("type", "boolean")
-                put("description", "true to enable sync, false to disable")
-            })
-        }))
-
-    tools.put(toolDef("get_log_sync",
-        "Check if cloud log sync is enabled.",
-        JSONObject()))
         JSONObject()))
 
     tools.put(toolDef("set_log_sync",

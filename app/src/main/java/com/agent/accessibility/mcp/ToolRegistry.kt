@@ -11,27 +11,21 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
     val tools = JSONArray()
 
     tools.put(toolDef("observe",
-        "PREFERRED. Returns a semantic representation of the current screen. " +
+        "Returns a semantic representation of the current screen. " +
         "Elements have roles (action, input, toggle, value, section, header, list, tab). " +
-        "Each element has an id that works with click_node and input_text. " +
-        "Use this instead of get_screen_state for cleaner reasoning.",
+        "Each element has an id for click_node and input_text. " +
+        "IMPORTANT: Element IDs change between calls. Use them immediately after observe(). " +
+        "Don't cache IDs across multiple observe() calls.",
         JSONObject()))
 
     tools.put(toolDef("click_node",
-        "PREFERRED for clicking. Clicks an element returned by observe(). " +
+        "Clicks an element returned by observe(). " +
         "Pass the element's `id` exactly as returned by observe(). " +
-        "More reliable than tap() because it uses the accessibility node directly. " +
-        "After navigation, call observe() again before clicking.",
+        "IMPORTANT: Always call observe() first to get fresh element IDs, then immediately click. " +
+        "Element IDs change between observe() calls, so don't cache them. " +
+        "Returns screenChanged=true if the click navigated to a different app.",
         JSONObject().apply {
             put("id", stringParam("Element id from observe (e.g. \"1:7\")"))
-        }))
-
-    tools.put(toolDef("tap",
-        "DEPRECATED - use click_node instead. Only use for elements without an id " +
-        "(e.g., canvas, custom views). Less reliable than click_node.",
-        JSONObject().apply {
-            put("x", intParam("X coordinate"))
-            put("y", intParam("Y coordinate"))
         }))
 
     tools.put(toolDef("swipe", "Swipe between two points", JSONObject().apply {

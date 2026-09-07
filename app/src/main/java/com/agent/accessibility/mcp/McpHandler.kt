@@ -99,7 +99,6 @@ class McpHandler(internal val context: Context) {
         return when (toolName) {
             "get_screen_state" -> getScreenState(id)
             "click_node" -> clickNode(id, args)
-            "tap" -> tap(id, args)
             "swipe" -> swipe(id, args)
             "input_text" -> inputText(id, args)
             "back" -> back(id)

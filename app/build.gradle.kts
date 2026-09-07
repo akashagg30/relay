@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.2"
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
@@ -79,4 +80,23 @@ tasks.configureEach {
             println("=== BUILD VERSION: versionCode=$commitCount versionName=1.0.$commitCount ===")
         }
     }
+}
+
+
+ktlint {
+    android = true
+    ignoreFailures = false
+    reporter = "checkstyle,plain"
+    reporters {
+        reporter("checkstyle")
+        reporter("plain")
+    }
+    filter {
+        exclude("**/build/**")
+        exclude("**/generated/**")
+    }
+}
+
+tasks.withType<org.jlleitschuh.gradle.ktlint.tasks.KtLintCheckTask> {
+    dependsOn("lint")
 }

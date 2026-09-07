@@ -32,6 +32,9 @@ jobs:
       - name: Clean
         run: ./gradlew clean --no-daemon
 
+      - name: Ktlint
+        run: ./gradlew ktlintCheck --no-daemon
+
       - name: Lint
         run: ./gradlew lint --no-daemon
 

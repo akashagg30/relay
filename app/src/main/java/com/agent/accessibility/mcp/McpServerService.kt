@@ -540,7 +540,7 @@ class McpServerService : Service() {
                         Log.d(TAG, "cloudflared: $line")
                         val match = if (line != null && "trycloudflare.com" in line) line else null
                         if (match != null) {
-                            cloudflaredUrl = match.value
+                            cloudflaredUrl = match
                             Log.d(TAG, "Tunnel URL: $cloudflaredUrl")
                         }
                     }

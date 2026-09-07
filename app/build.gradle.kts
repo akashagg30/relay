@@ -86,17 +86,4 @@ tasks.configureEach {
 ktlint {
     android = true
     ignoreFailures = false
-    reporter = "checkstyle,plain"
-    reporters {
-        reporter("checkstyle")
-        reporter("plain")
-    }
-    filter {
-        exclude("**/build/**")
-        exclude("**/generated/**")
-    }
-}
-
-tasks.withType<org.jlleitschuh.gradle.ktlint.tasks.KtLintCheckTask> {
-    dependsOn("lint")
 }

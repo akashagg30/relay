@@ -494,12 +494,73 @@ class McpServerService : Service() {
         saveApprovedClients(approvedClients)
     }
 
+    private var cloudflaredProcess: Process? = null
+    private var cloudflaredUrl: String? = null
+
     fun startTunnel() {
         if (!isRunning) {
             Log.w(TAG, "Cannot start tunnel: MCP server not running")
             return
         }
-        cloudflareTunnel?.start()
+        if (cloudflaredProcess != null) {
+            Log.w(TAG, "Tunnel already running")
+            return
+        }
+        
+        try {
+            val binaryFile = File(applicationInfo.nativeLibraryDir, "libcloudflared.so")
+            if (!binaryFile.exists()) {
+                Log.e(TAG, "cloudflared binary not found")
+                return
+            }
+            
+            // Copy to cache and make executable
+            val cacheFile = File(cacheDir, "cloudflared")
+            binaryFile.copyTo(cacheFile, overwrite = true)
+            cacheFile.setExecutable(true, false)
+            
+            val pb = ProcessBuilder(
+                cacheFile.absolutePath,
+                "tunnel",
+                "--url", "http://127.0.0.1:$port"
+            )
+            pb.redirectErrorStream(false)
+            pb.environment()["HOME"] = cacheDir.absolutePath
+            
+            cloudflaredProcess = pb.start()
+            Log.d(TAG, "cloudflared process started")
+            
+            // Read stdout for URL
+            Thread {
+                try {
+                    val reader = cloudflaredProcess!!.inputStream.bufferedReader()
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        Log.d(TAG, "cloudflared: $line")
+                        val match = Regex("https://[a-zA-Z0-9-]+\.trycloudflare\.com").find(line ?: "")
+                        if (match != null) {
+                            cloudflaredUrl = match.value
+                            Log.d(TAG, "Tunnel URL: $cloudflaredUrl")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error reading cloudflared output", e)
+                }
+            }.start()
+            
+            // Update notification
+            startForegroundWithNotification()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start tunnel", e)
+        }
+    }
+
+    fun stopTunnel() {
+        cloudflaredProcess?.destroyForcibly()
+        cloudflaredProcess = null
+        cloudflaredUrl = null
+        Log.d(TAG, "Tunnel stopped")
+        startForegroundWithNotification()
     }
 
     fun stopTunnel() {
@@ -638,7 +699,7 @@ class McpServerService : Service() {
 
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Relay MCP Server")
-            .setContentText("Port $port | Token: ...${authToken.takeLast(4)}")
+            .setContentText(buildString { append("Port $port"); cloudflaredUrl?.let { append(" | Tunnel: $it") } })
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

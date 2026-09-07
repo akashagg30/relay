@@ -153,7 +153,13 @@ internal fun McpHandler.searchInApp(id: String, args: JSONObject): String {
     val packageName = args.optString("packageName", "")
 
     try {
-        val intent = if (packageName.isNotEmpty()) {
+        val intent = if (packageName == "com.android.vending") {
+            // Play Store: use market URI directly (avoids chooser dialog)
+            Intent(Intent.ACTION_VIEW).apply {
+                data = android.net.Uri.parse("market://search?q=$query")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        } else if (packageName.isNotEmpty()) {
             // Search in specific app
             Intent(Intent.ACTION_SEARCH).apply {
                 setPackage(packageName)

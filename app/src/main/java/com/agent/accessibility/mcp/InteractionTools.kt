@@ -690,26 +690,20 @@ internal fun McpHandler.pressKey(id: String, args: JSONObject): String {
         }
     }
 
-    // Send key event via accessibility service
-    val downEvent = android.view.KeyEvent(System.currentTimeMillis(), System.currentTimeMillis(), android.view.KeyEvent.ACTION_DOWN, keyCode, 0)
-    val upEvent = android.view.KeyEvent(System.currentTimeMillis(), System.currentTimeMillis(), android.view.KeyEvent.ACTION_UP, keyCode, 0)
-
-    // Use the service's input connection to send key events
-    val result = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) // Placeholder
-
-    // Actually, we need to use a different approach - send via the focused window
-    val focusedWindow = service.rootInActiveWindow
-    if (focusedWindow != null) {
-        // For enter key, we can use performAction on the focused node
-        val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        if (focused != null && key.lowercase() in listOf("enter", "return")) {
-            val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Log.d(TAG, "Press key: $key (click on focused node: $clickResult)")
-            return toolSuccessResponse(id, JSONObject().apply {
-                put("success", clickResult)
-                put("key", key)
-                put("method", "click_focused")
-            }.toString())
+    // For enter key, click the focused node (Chrome's search button)
+    if (key.lowercase() in listOf("enter", "return")) {
+        val focusedWindow = service.rootInActiveWindow
+        if (focusedWindow != null) {
+            val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            if (focused != null) {
+                val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.d(TAG, "Press key: $key (click on focused node: $clickResult)")
+                return toolSuccessResponse(id, JSONObject().apply {
+                    put("success", clickResult)
+                    put("key", key)
+                    put("method", "click_focused")
+                }.toString())
+            }
         }
     }
 

@@ -143,6 +143,19 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
             })
         }))
 
+    tools.put(toolDef("get_logs",
+        "Get recent log entries. Returns the last N tool calls with timestamps, success/failure, and timing.",
+        JSONObject().apply {
+            put("limit", JSONObject().apply {
+                put("type", "integer")
+                put("description", "Number of recent entries to return (default 20, max 100)")
+            })
+        }))
+
+    tools.put(toolDef("share_logs",
+        "Open Android share sheet to share logs as a text file. User can share via email, messaging, etc.",
+        JSONObject()))
+
     tools.put(toolDef("take_screenshot",
         "Capture the current screen as a base64-encoded PNG image. " +
         "Returns the image data, dimensions, and format. " +

@@ -121,7 +121,8 @@ class McpHandler(internal val context: Context) {
             "set_log_sync" -> setLogSync(id, args)
             "get_log_sync" -> getLogSync(id)
             "set_sync_endpoint" -> setSyncEndpoint(id, args)
-            "set_sync_endpoint" -> setSyncEndpoint(id, args)
+            "get_logs" -> getLogs(id, args)
+            "share_logs" -> shareLogs(id)
             "take_screenshot" -> takeScreenshot(id)
             "screenshot_with_overlay" -> screenshotWithOverlay(id)
             else -> errorResponse(id, "Unknown tool: $toolName")
@@ -217,5 +218,41 @@ class McpHandler(internal val context: Context) {
         return toolSuccessResponse(id, JSONObject().apply {
             put("summary", auditLogger.getSummary())
         }.toString())
+    }
+
+    internal fun getLogs(id: String, args: JSONObject): String {
+        val limit = args.optInt("limit", 20).coerceIn(1, 100)
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("entries", org.json.JSONArray(localLogStore.getRecentJson(limit)))
+        }.toString())
+    }
+
+    internal fun shareLogs(id: String): String {
+        try {
+            val logText = localLogStore.getRecentJson(100)
+            val file = java.io.File(context.cacheDir, "relay_logs.txt")
+            file.writeText(logText)
+
+            val uri = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+            } else {
+                android.net.Uri.fromFile(file)
+            }
+
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "Relay MCP Logs")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(android.content.Intent.createChooser(intent, "Share Logs"))
+            return toolSuccessResponse(id, JSONObject().apply { put("shared", true) }.toString())
+        } catch (e: Exception) {
+            return toolErrorResponse(id, "Share failed: ${e.message}")
+        }
     }
 }

@@ -735,7 +735,8 @@ class NodeResolverTest {
             "com.example"
         )
 
-        for (i in 1..15) {
+        // Store more than MAX_SNAPSHOTS (50) to trigger eviction
+        for (i in 1..55) {
             snapshotManager.store(mapOf(1 to makeDescriptor(id = 1, text = "Item $i")), "com.example")
         }
 

@@ -253,6 +253,83 @@ fun DebugScreen(controller: AccessibilityController) {
                     DebugControlsCard(controller = controller)
                 }
             }
+
+            item {
+                ShareLogsCard(context = context)
+            }
+        }
+    }
+}
+
+@Composable
+fun ShareLogsCard(context: Context) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Logs & Diagnostics",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Share logs for debugging or send to developer for support.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+            Button(
+                onClick = {
+                    val scope = CoroutineScope(Dispatchers.IO)
+                    scope.launch {
+                        try {
+                            val logFile = java.io.File(context.cacheDir, "relay_logs.txt")
+                            val logDir = java.io.File(context.filesDir, "mcp_logs")
+                            val sb = StringBuilder()
+                            sb.appendLine("=== Relay MCP Logs ===")
+                            sb.appendLine("Version: ${com.agent.accessibility.BuildConfig.APP_VERSION}")
+                            sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+                            sb.appendLine()
+                            if (logDir.exists()) {
+                                logDir.listFiles()?.sortedByDescending { it.name }?.take(3)?.forEach { file ->
+                                    sb.appendLine("--- ${file.name} ---")
+                                    sb.appendLine(file.readText().take(5000))
+                                    sb.appendLine()
+                                }
+                            }
+                            logFile.writeText(sb.toString())
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                logFile
+                            )
+                            withContext(Dispatchers.Main) {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Relay MCP Logs")
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(android.content.Intent.createChooser(intent, "Share Logs"))
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("ShareLogs", "Failed to share logs", e)
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text("SHARE LOGS")
+            }
         }
     }
 }

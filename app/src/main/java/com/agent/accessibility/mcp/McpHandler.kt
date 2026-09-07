@@ -118,7 +118,6 @@ class McpHandler(internal val context: Context) {
             "diag_sealed" -> diagSealed(id, args)
             "get_audit_log" -> getAuditLog(id, args)
             "get_audit_summary" -> getAuditSummary(id)
-            "get_session" -> getSession(id)
             "set_log_sync" -> setLogSync(id, args)
             "get_log_sync" -> getLogSync(id)
             "set_sync_endpoint" -> setSyncEndpoint(id, args)

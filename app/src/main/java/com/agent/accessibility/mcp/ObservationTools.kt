@@ -243,6 +243,30 @@ internal fun McpHandler.observe(id: String): String {
 
         val scene = SemanticProjector.project(tree, snapshotId, metrics.heightPixels, metrics.widthPixels)
 
+        // Fallback: if projected output is too sparse, use get_screen_state format
+        // This handles dialogs and popups where SemanticProjector filters too aggressively
+        val rawNodeCount = tree.totalNodeCount
+        val projectedCount = scene.totalDescendantCount()
+        if (projectedCount == 0 && rawNodeCount > 0) {
+            // Build a simple list from raw nodes (like get_screen_state)
+            val nodesArray = JSONArray()
+            flattenForJson(tree.rootInActiveWindow ?: rootNode, null, nodesArray, snapshotId)
+            val fallbackJson = JSONObject()
+            fallbackJson.put("packageName", tree.foregroundPackage ?: "unknown")
+            fallbackJson.put("snapshotId", snapshotId)
+            fallbackJson.put("nodes", nodesArray)
+            fallbackJson.put("screenWidth", metrics.widthPixels)
+            fallbackJson.put("screenHeight", metrics.heightPixels)
+            fallbackJson.put("timestamp", System.currentTimeMillis())
+            fallbackJson.put("screenState", JSONObject().apply {
+                put("state", "stable")
+                put("keyboardVisible", false)
+                put("dialogVisible", true)
+            })
+            Log.d(TAG, "observe: projected=0 raw=$rawNodeCount, falling back to raw nodes")
+            return toolSuccessResponse(id, fallbackJson.toString())
+        }
+
         val now = System.currentTimeMillis()
         val timeSinceLastObserve = now - lastObserveTimestamp
         val elementCount = scene.totalDescendantCount()

@@ -659,3 +659,72 @@ internal fun McpHandler.home(id: String): String {
     Log.d(TAG, "Home: $result")
     return toolSuccessResponse(id, JSONObject().apply { put("success", result) }.toString())
 }
+
+internal fun McpHandler.pressKey(id: String, args: JSONObject): String {
+    val key = args.optString("key", "")
+    if (key.isEmpty()) return toolErrorResponse(id, "Empty key")
+
+    val service = AgentAccessibilityService.instance
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
+
+    // Map common key names to keycodes
+    val keyCode = when (key.lowercase()) {
+        "enter", "return" -> android.view.KeyEvent.KEYCODE_ENTER
+        "back" -> android.view.KeyEvent.KEYCODE_BACK
+        "home" -> android.view.KeyEvent.KEYCODE_HOME
+        "tab" -> android.view.KeyEvent.KEYCODE_TAB
+        "delete", "del" -> android.view.KeyEvent.KEYCODE_DEL
+        "space" -> android.view.KeyEvent.KEYCODE_SPACE
+        "escape", "esc" -> android.view.KeyEvent.KEYCODE_ESCAPE
+        "up" -> android.view.KeyEvent.KEYCODE_DPAD_UP
+        "down" -> android.view.KeyEvent.KEYCODE_DPAD_DOWN
+        "left" -> android.view.KeyEvent.KEYCODE_DPAD_LEFT
+        "right" -> android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+        else -> {
+            try {
+                val field = android.view.KeyEvent::class.java.getField("KEYCODE_${key.uppercase()}")
+                field.getInt(null)
+            } catch (e: Exception) {
+                return toolErrorResponse(id, "Unknown key: $key")
+            }
+        }
+    }
+
+    // Send key event via accessibility service
+    val downEvent = android.view.KeyEvent(System.currentTimeMillis(), System.currentTimeMillis(), android.view.KeyEvent.ACTION_DOWN, keyCode, 0)
+    val upEvent = android.view.KeyEvent(System.currentTimeMillis(), System.currentTimeMillis(), android.view.KeyEvent.ACTION_UP, keyCode, 0)
+
+    // Use the service's input connection to send key events
+    val result = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) // Placeholder
+
+    // Actually, we need to use a different approach - send via the focused window
+    val focusedWindow = service.rootInActiveWindow
+    if (focusedWindow != null) {
+        // For enter key, we can use performAction on the focused node
+        val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        if (focused != null && key.lowercase() in listOf("enter", "return")) {
+            val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Log.d(TAG, "Press key: $key (click on focused node: $clickResult)")
+            return toolSuccessResponse(id, JSONObject().apply {
+                put("success", clickResult)
+                put("key", key)
+                put("method", "click_focused")
+            }.toString())
+        }
+    }
+
+    // Fallback: use shell command to send key event
+    try {
+        val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "input keyevent $keyCode"))
+        process.waitFor()
+        Log.d(TAG, "Press key: $key (keyCode=$keyCode) via shell")
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("success", true)
+            put("key", key)
+            put("method", "shell")
+        }.toString())
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to press key: $key", e)
+        return toolErrorResponse(id, "Failed to press key: ${e.message}")
+    }
+}

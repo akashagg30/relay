@@ -103,6 +103,7 @@ class McpHandler(internal val context: Context) {
             "click_node" -> clickNode(id, args)
             "swipe" -> swipe(id, args)
             "input_text" -> inputText(id, args)
+            "press_key" -> pressKey(id, args)
             "back" -> back(id)
             "home" -> home(id)
             "launch_app" -> launchApp(id, args)

@@ -119,9 +119,7 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "Get aggregate tool usage statistics. Shows success rates, average timing, and methods used per tool.",
         JSONObject()))
 
-    tools.put(toolDef("get_session",
-        "Check if MCP is busy with another session. Returns current session info.",
-        JSONObject()))
+
 
     tools.put(toolDef("set_log_sync",
         "Enable or disable cloud log sync. When enabled, logs are sent to the developer for debugging. " +

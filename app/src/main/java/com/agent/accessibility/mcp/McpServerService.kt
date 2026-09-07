@@ -48,6 +48,8 @@ class McpServerService : Service() {
     private var serverThread: Thread? = null
     private lateinit var authManager: AuthManager
     private lateinit var mcpHandler: McpHandler
+    private var activeSession: String? = null
+    private val sessionLock = Object()
     private lateinit var rateLimiter: RateLimiter
     private lateinit var auditLogger: AuditLogger
     private lateinit var consentPrefs: SharedPreferences

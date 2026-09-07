@@ -48,7 +48,7 @@ class McpServerService : Service() {
     private var serverThread: Thread? = null
     private lateinit var authManager: AuthManager
     private lateinit var mcpHandler: McpHandler
-    internal var activeSession: String? = null
+    private var activeSession: String? = null
     private val sessionLock = Object()
     private lateinit var rateLimiter: RateLimiter
     private lateinit var auditLogger: AuditLogger
@@ -328,35 +328,8 @@ class McpServerService : Service() {
             return Triple(401, """{"error":"Unauthorized"}""", false)
         }
 
-        // Session lock: exclusive for write operations, shared for reads
-        val sessionId = clientIp
-        val isReadOnly = body.contains(""observe"") || body.contains(""current_app"") || 
-                         body.contains(""get_screen_state"") || body.contains(""find"") ||
-                         body.contains(""list_apps"") || body.contains(""search_apps"") ||
-                         body.contains(""get_audit") || body.contains(""get_session"")
-        
-        if (!isReadOnly) {
-            synchronized(sessionLock) {
-                if (activeSession != null && activeSession != sessionId) {
-                    val errorMsg = """{"jsonrpc":"2.0","id":"1","error":{"code":-32000,"message":"MCP is busy with session $activeSession. Wait or disconnect."}}"""
-                    Log.w(TAG, "Session conflict: $activeSession is active, $sessionId rejected")
-                    return Triple(429, errorMsg, false)
-                }
-                activeSession = sessionId
-            }
-        }
-
         Log.d(TAG, "MCP request from $clientIp: ${body.take(200)}")
         val response = mcpHandler.handleRequest(body)
-
-        // Release session lock after write operations
-        if (!isReadOnly) {
-            synchronized(sessionLock) {
-                if (activeSession == sessionId) {
-                    activeSession = null
-                }
-            }
-        }
 
         // Empty response means it was a notification
         if (response.isEmpty()) {

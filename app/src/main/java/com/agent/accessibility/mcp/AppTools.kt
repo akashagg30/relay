@@ -141,53 +141,7 @@ internal fun McpHandler.openApp(id: String, args: JSONObject): String {
     }
 }
 
-/**
- * Search within an app using intent.
- * Bypasses hidden EditText by launching app with search query directly.
- * Works for Play Store, Chrome, Settings, and other apps that support search intents.
- */
-internal fun McpHandler.searchInApp(id: String, args: JSONObject): String {
-    val query = args.optString("query", "")
-    if (query.isEmpty()) return toolErrorResponse(id, "Empty query")
 
-    val packageName = args.optString("packageName", "")
-
-    try {
-        val intent = if (packageName == "com.android.vending") {
-            // Play Store: use market URI directly (avoids chooser dialog)
-            Intent(Intent.ACTION_VIEW).apply {
-                data = android.net.Uri.parse("market://search?q=$query")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        } else if (packageName.isNotEmpty()) {
-            // Search in specific app
-            Intent(Intent.ACTION_SEARCH).apply {
-                setPackage(packageName)
-                putExtra("query", query)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        } else {
-            // Generic web search
-            Intent(Intent.ACTION_WEB_SEARCH).apply {
-                putExtra("query", query)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        }
-
-        context.startActivity(intent)
-        Log.d(TAG, "Search in app: query='$query' package=$packageName")
-        Thread.sleep(500)
-
-        return toolSuccessResponse(id, JSONObject().apply {
-            put("success", true)
-            put("query", query)
-            put("packageName", packageName.ifEmpty { "browser" })
-        }.toString())
-    } catch (e: Exception) {
-        Log.e(TAG, "Search in app failed", e)
-        return toolErrorResponse(id, "Search failed: ${e.message}")
-    }
-}
 
 internal fun McpHandler.currentApp(id: String): String {
     val service = AgentAccessibilityService.instance

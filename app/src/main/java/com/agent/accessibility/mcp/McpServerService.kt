@@ -11,6 +11,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import java.io.File
 import com.agent.accessibility.MainActivity
 import org.json.JSONArray
 import org.json.JSONObject
@@ -563,8 +564,6 @@ class McpServerService : Service() {
         startForegroundWithNotification()
     }
 
-    fun stopTunnel() {
-        cloudflareTunnel?.stop()
     }
 
     fun regenerateAuthToken(): String {

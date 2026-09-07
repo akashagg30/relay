@@ -68,8 +68,8 @@ internal fun McpHandler.findForegroundRoot(service: AgentAccessibilityService): 
             windowRoot.packageName?.toString() != context.packageName
         ) {
             val windowPkg = windowRoot.packageName?.toString()
-            // Only consider popups from the same app as the active window
-            if (activePackageName != null && windowPkg != activePackageName) {
+            // Consider popups from same app OR system dialogs (android package)
+            if (activePackageName != null && windowPkg != activePackageName && windowPkg != "android") {
                 Log.d(TAG, "  Skipping window pkg=$windowPkg (not same as active $activePackageName)")
                 continue
             }

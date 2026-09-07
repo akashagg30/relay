@@ -71,3 +71,12 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.14.2")
 }
+
+// Debug: print version during build
+tasks.configureEach {
+    if (name == "assembleDebug") {
+        doFirst {
+            println("=== BUILD VERSION: versionCode=$commitCount versionName=1.0.$commitCount ===")
+        }
+    }
+}

@@ -29,6 +29,7 @@ class McpHandler(internal val context: Context) {
 
     internal val appRegistry = AppRegistry(context)
     internal val auditLogger = ToolAuditLogger(context)
+    internal val localLogStore = LocalLogStore(context)
 
     // Cached observation state shared by observe / find / scroll_until.
     @Volatile internal var lastObserveTimestamp = 0L
@@ -117,6 +118,8 @@ class McpHandler(internal val context: Context) {
             "diag_sealed" -> diagSealed(id, args)
             "get_audit_log" -> getAuditLog(id, args)
             "get_audit_summary" -> getAuditSummary(id)
+            "set_log_sync" -> setLogSync(id, args)
+            "get_log_sync" -> getLogSync(id)
             "take_screenshot" -> takeScreenshot(id)
             "screenshot_with_overlay" -> screenshotWithOverlay(id)
             else -> errorResponse(id, "Unknown tool: $toolName")
@@ -184,6 +187,19 @@ class McpHandler(internal val context: Context) {
         }.toString())
     }
 
+    internal fun setLogSync(id: String, args: JSONObject): String {
+        val enabled = args.optBoolean("enabled", false)
+        localLogStore.setSyncEnabled(enabled)
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("syncEnabled", localLogStore.isSyncEnabled())
+        }.toString())
+    }
+
+    internal fun getLogSync(id: String): String {
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("syncEnabled", localLogStore.isSyncEnabled())
+        }.toString())
+    }
     internal fun getAuditSummary(id: String): String {
         return toolSuccessResponse(id, JSONObject().apply {
             put("summary", auditLogger.getSummary())

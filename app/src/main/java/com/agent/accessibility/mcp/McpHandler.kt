@@ -258,10 +258,3 @@ class McpHandler(internal val context: Context) {
     }
 }
 
-    internal fun getSession(id: String): String {
-        val activeSession = com.agent.accessibility.mcp.McpServerService.instance?.activeSession
-        return toolSuccessResponse(id, JSONObject().apply {
-            put("activeSession", activeSession ?: "none")
-            put("isBusy", activeSession != null)
-        }.toString())
-    }

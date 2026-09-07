@@ -121,6 +121,7 @@ class McpHandler(internal val context: Context) {
             "set_log_sync" -> setLogSync(id, args)
             "get_log_sync" -> getLogSync(id)
             "set_sync_endpoint" -> setSyncEndpoint(id, args)
+            "set_sync_endpoint" -> setSyncEndpoint(id, args)
             "take_screenshot" -> takeScreenshot(id)
             "screenshot_with_overlay" -> screenshotWithOverlay(id)
             else -> errorResponse(id, "Unknown tool: $toolName")

@@ -690,19 +690,26 @@ internal fun McpHandler.pressKey(id: String, args: JSONObject): String {
         }
     }
 
-    // For enter key, click the focused node (Chrome's search button)
-    if (key.lowercase() in listOf("enter", "return")) {
-        val focusedWindow = service.rootInActiveWindow
-        if (focusedWindow != null) {
-            val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-            if (focused != null) {
-                val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.d(TAG, "Press key: $key (click on focused node: $clickResult)")
-                return toolSuccessResponse(id, JSONObject().apply {
-                    put("success", clickResult)
-                    put("key", key)
-                    put("method", "click_focused")
-                }.toString())
+    // Try using IME InputConnection to send key event (works with Chrome)
+    val focusedWindow = service.rootInActiveWindow
+    if (focusedWindow != null) {
+        val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (focused != null) {
+            try {
+                // Get the input connection and send key event
+                val connection = focused.createConnection()
+                if (connection != null) {
+                    val keyEvent = android.view.KeyEvent(System.currentTimeMillis(), System.currentTimeMillis(), android.view.KeyEvent.ACTION_DOWN, keyCode, 0)
+                    val result = connection.sendKeyEvent(keyEvent)
+                    Log.d(TAG, "Press key: $key (keyCode=$keyCode) via IME, result=$result")
+                    return toolSuccessResponse(id, JSONObject().apply {
+                        put("success", true)
+                        put("key", key)
+                        put("method", "ime")
+                    }.toString())
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "IME method failed for $key, trying shell", e)
             }
         }
     }

@@ -50,6 +50,11 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
             put("key", stringParam("Key to press: enter, back, home, tab, etc."))
         }))
 
+    tools.put(toolDef("submit",
+        "Find and click the submit/search/go button on the current screen. " +
+        "Use after typing in a search bar or form field. More reliable than press_key enter.",
+        JSONObject()))
+
     tools.put(toolDef("back", "Perform back action", JSONObject()))
     tools.put(toolDef("home", "Go to home screen", JSONObject()))
 

@@ -719,3 +719,80 @@ internal fun McpHandler.pressKey(id: String, args: JSONObject): String {
         return toolErrorResponse(id, "Failed to press key: ${e.message}")
     }
 }
+
+internal fun McpHandler.submit(id: String): String {
+    val service = AgentAccessibilityService.instance
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
+
+    // Find the focused node
+    val focusedWindow = service.rootInActiveWindow
+    if (focusedWindow == null) {
+        return toolErrorResponse(id, "No active window")
+    }
+
+    val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+    if (focused == null) {
+        return toolErrorResponse(id, "No focused element found")
+    }
+
+    // Try clicking the focused node
+    val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    if (clickResult) {
+        Log.d(TAG, "Submit: clicked focused node")
+        return toolSuccessResponse(id, JSONObject().apply {
+            put("success", true)
+            put("method", "click_focused")
+        }.toString())
+    }
+
+    // Try finding and clicking a submit/search/go button
+    val rootNode = service.rootInActiveWindow
+    if (rootNode != null) {
+        // Look for buttons with submit/search/go text
+        val buttons = mutableListOf<AccessibilityNodeInfo>()
+        findSubmitButtons(rootNode, buttons)
+        
+        for (button in buttons) {
+            val result = button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (result) {
+                Log.d(TAG, "Submit: clicked button '${button.text}'")
+                return toolSuccessResponse(id, JSONObject().apply {
+                    put("success", true)
+                    put("method", "click_button")
+                    put("button", button.text?.toString() ?: "")
+                }.toString())
+            }
+        }
+    }
+
+    // Fallback: tap the search button area (top-right of URL bar)
+    val bounds = Rect()
+    focused.getBoundsInScreen(bounds)
+    val searchX = bounds.width() - 50
+    val searchY = bounds.centerY()
+    val path = android.graphics.Path()
+    path.moveTo(searchX.toFloat(), searchY.toFloat())
+    val gestureBuilder = android.accessibilityservice.GestureDescription.Builder()
+    gestureBuilder.addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 100))
+    val gestureResult = service.dispatchGesture(gestureBuilder.build(), null, null)
+    Log.d(TAG, "Submit: tapped search area at $searchX,$searchY")
+    return toolSuccessResponse(id, JSONObject().apply {
+        put("success", gestureResult)
+        put("method", "tap_search_area")
+    }.toString())
+}
+
+private fun findSubmitButtons(node: AccessibilityNodeInfo, results: MutableList<AccessibilityNodeInfo>) {
+    val text = node.text?.toString()?.lowercase() ?: ""
+    val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+    
+    if (node.isClickable && (text in listOf("submit", "search", "go", "enter", "send", "ok", "done") ||
+        desc in listOf("submit", "search", "go", "enter", "send", "ok", "done"))) {
+        results.add(node)
+    }
+    
+    for (i in 0 until node.childCount) {
+        val child = node.getChild(i) ?: continue
+        findSubmitButtons(child, results)
+    }
+}

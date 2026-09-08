@@ -104,6 +104,7 @@ class McpHandler(internal val context: Context) {
             "swipe" -> swipe(id, args)
             "input_text" -> inputText(id, args)
             "press_key" -> pressKey(id, args)
+            "submit" -> submit(id)
             "back" -> back(id)
             "home" -> home(id)
             "launch_app" -> launchApp(id, args)

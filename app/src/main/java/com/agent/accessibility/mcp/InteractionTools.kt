@@ -690,18 +690,23 @@ internal fun McpHandler.pressKey(id: String, args: JSONObject): String {
         }
     }
 
-    // Try using InputMethod.AccessibilityInputConnection.sendKeyEvent (works with Chrome)
-    try {
-        val keyEvent = android.view.KeyEvent(System.currentTimeMillis(), System.currentTimeMillis(), android.view.KeyEvent.ACTION_DOWN, keyCode, 0)
-        service.sendKeyEvent(keyEvent)
-        Log.d(TAG, "Press key: $key (keyCode=$keyCode) via sendKeyEvent")
-        return toolSuccessResponse(id, JSONObject().apply {
-            put("success", true)
-            put("key", key)
-            put("method", "sendKeyEvent")
-        }.toString())
-    } catch (e: Exception) {
-        Log.w(TAG, "sendKeyEvent failed for $key, trying shell", e)
+    // For enter key, try clicking the focused node
+    if (key.lowercase() in listOf("enter", "return")) {
+        val focusedWindow = service.rootInActiveWindow
+        if (focusedWindow != null) {
+            val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            if (focused != null) {
+                val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.d(TAG, "Press key: $key (click on focused node: $clickResult)")
+                if (clickResult) {
+                    return toolSuccessResponse(id, JSONObject().apply {
+                        put("success", true)
+                        put("key", key)
+                        put("method", "click_focused")
+                    }.toString())
+                }
+            }
+        }
     }
 
     // Fallback: use shell command to send key event

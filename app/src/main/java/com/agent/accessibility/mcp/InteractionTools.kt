@@ -690,18 +690,44 @@ internal fun McpHandler.pressKey(id: String, args: JSONObject): String {
         }
     }
 
-    // Try using InputMethod.AccessibilityInputConnection.sendKeyEvent (works with Chrome)
-    try {
-        val keyEvent = android.view.KeyEvent(System.currentTimeMillis(), System.currentTimeMillis(), android.view.KeyEvent.ACTION_DOWN, keyCode, 0)
-        service.sendKeyEvent(keyEvent)
-        Log.d(TAG, "Press key: $key (keyCode=$keyCode) via sendKeyEvent")
-        return toolSuccessResponse(id, JSONObject().apply {
-            put("success", true)
-            put("key", key)
-            put("method", "sendKeyEvent")
-        }.toString())
-    } catch (e: Exception) {
-        Log.w(TAG, "sendKeyEvent failed for $key, trying shell", e)
+    // For enter key, try clicking the search button area in Chrome
+    if (key.lowercase() in listOf("enter", "return")) {
+        val focusedWindow = service.rootInActiveWindow
+        if (focusedWindow != null) {
+            // Try to find and click the search/go button
+            val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            if (focused != null) {
+                // First try clicking the focused node directly
+                val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.d(TAG, "Press key: $key (click on focused node: $clickResult)")
+                if (clickResult) {
+                    return toolSuccessResponse(id, JSONObject().apply {
+                        put("success", true)
+                        put("key", key)
+                        put("method", "click_focused")
+                    }.toString())
+                }
+            }
+            
+            // If clicking focused node didn't work, try tapping the search button area
+            // Chrome's search button is typically at the top-right of the URL bar
+            val bounds = Rect()
+            focusedWindow.getBoundsInScreen(bounds)
+            // Search button is usually at x=width-50, y=height/2 (approximate)
+            val searchX = bounds.width() - 50
+            val searchY = bounds.centerY()
+            val path = android.graphics.Path()
+            path.moveTo(searchX.toFloat(), searchY.toFloat())
+            val gestureBuilder = android.accessibilityservice.GestureDescription.Builder()
+            gestureBuilder.addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 100))
+            val gestureResult = service.dispatchGesture(gestureBuilder.build(), null, null)
+            Log.d(TAG, "Press key: $key (tap search button at $searchX,$searchY: $gestureResult)")
+            return toolSuccessResponse(id, JSONObject().apply {
+                put("success", gestureResult)
+                put("key", key)
+                put("method", "tap_search_button")
+            }.toString())
+        }
     }
 
     // Fallback: use shell command to send key event

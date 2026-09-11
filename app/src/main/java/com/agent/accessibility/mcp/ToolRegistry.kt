@@ -57,8 +57,10 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         }))
 
     tools.put(toolDef("submit",
-        "Find and click the submit/search/go button on the current screen. " +
-        "Use after typing in a search bar or form field. More reliable than press_key enter.",
+        "Submit a form, search box, or dialog. Prefer this over press_key enter after input_text — " +
+        "it uses the IME enter action, which is what tapping the keyboard's Go/Enter key does, " +
+        "so it works with apps that ignore synthetic key events (e.g. Chrome). " +
+        "Falls back to clicking a submit button, then to the input's trailing edge.",
         JSONObject()))
 
     tools.put(toolDef("back", "Perform back action", JSONObject()))

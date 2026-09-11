@@ -11,6 +11,7 @@ import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -735,73 +736,113 @@ internal fun McpHandler.submit(id: String): String {
     val service = AgentAccessibilityService.instance
         ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
-    // Find the focused node
-    val focusedWindow = service.rootInActiveWindow
-    if (focusedWindow == null) {
-        return toolErrorResponse(id, "No active window")
+    val root = service.rootInActiveWindow
+        ?: return toolErrorResponse(id, "No active window")
+
+    // Locate the text-entry target. FOCUS_INPUT is the correct focus type for
+    // editable fields; fall back to accessibility focus, then a tree scan.
+    val target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        ?: root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        ?: findFirstEditable(root)
+
+    // Attempt 1 — IME enter action (API 30+). This is the general, app-agnostic
+    // path: it performs exactly what tapping the keyboard's "Go"/"Enter" key does,
+    // so it works for apps that ignore synthetic key events (e.g. Chrome).
+    if (target != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
+            Log.d(TAG, "Submit: via ACTION_IME_ENTER")
+            return toolSuccessResponse(id, JSONObject().apply {
+                put("success", true)
+                put("method", "ime_enter")
+            }.toString())
+        }
     }
 
-    val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-    if (focused == null) {
-        return toolErrorResponse(id, "No focused element found")
+    // Attempt 2 — any node on screen advertising an IME enter action, or a
+    // clickable node whose label reads as a submit control.
+    val buttons = mutableListOf<AccessibilityNodeInfo>()
+    findSubmitButtons(root, buttons)
+    for (button in buttons) {
+        if (button.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            Log.d(TAG, "Submit: clicked button '${button.text ?: button.contentDescription}'")
+            return toolSuccessResponse(id, JSONObject().apply {
+                put("success", true)
+                put("method", "click_button")
+                put("label", (button.text ?: button.contentDescription)?.toString() ?: "")
+            }.toString())
+        }
     }
 
-    // Try clicking the focused node
-    val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-    if (clickResult) {
+    // Attempt 3 — click the input node itself (some apps submit on click).
+    if (target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
         Log.d(TAG, "Submit: clicked focused node")
         return toolSuccessResponse(id, JSONObject().apply {
             put("success", true)
-            put("method", "click_focused")
+            put("method", "click_input")
         }.toString())
     }
 
-    // Try finding and clicking a submit/search/go button
-    val rootNode = service.rootInActiveWindow
-    if (rootNode != null) {
-        // Look for buttons with submit/search/go text
-        val buttons = mutableListOf<AccessibilityNodeInfo>()
-        findSubmitButtons(rootNode, buttons)
-        
-        for (button in buttons) {
-            val result = button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            if (result) {
-                Log.d(TAG, "Submit: clicked button '${button.text}'")
+    // Attempt 4 — tap the trailing edge of the input's own bounds. Many apps draw
+    // the submit/search affordance inside the right end of the field.
+    if (target != null) {
+        val bounds = Rect()
+        target.getBoundsInScreen(bounds)
+        if (!bounds.isEmpty) {
+            val tapX = bounds.right - (bounds.width() * 0.08f).coerceAtLeast(24f)
+            val tapY = bounds.exactCenterY().toFloat()
+            val path = android.graphics.Path().apply { moveTo(tapX, tapY) }
+            val gesture = android.accessibilityservice.GestureDescription.Builder()
+                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 80))
+                .build()
+            val ok = service.dispatchGesture(gesture, null, null)
+            Log.d(TAG, "Submit: tapped field trailing edge at $tapX,$tapY -> $ok")
+            if (ok) {
                 return toolSuccessResponse(id, JSONObject().apply {
                     put("success", true)
-                    put("method", "click_button")
-                    put("button", button.text?.toString() ?: "")
+                    put("method", "tap_field_edge")
                 }.toString())
             }
         }
     }
 
-    // Fallback: tap the search button area (top-right of URL bar)
-    val bounds = Rect()
-    focused.getBoundsInScreen(bounds)
-    val searchX = bounds.width() - 50
-    val searchY = bounds.centerY()
-    val path = android.graphics.Path()
-    path.moveTo(searchX.toFloat(), searchY.toFloat())
-    val gestureBuilder = android.accessibilityservice.GestureDescription.Builder()
-    gestureBuilder.addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 100))
-    val gestureResult = service.dispatchGesture(gestureBuilder.build(), null, null)
-    Log.d(TAG, "Submit: tapped search area at $searchX,$searchY")
-    return toolSuccessResponse(id, JSONObject().apply {
-        put("success", gestureResult)
-        put("method", "tap_search_area")
-    }.toString())
+    return toolErrorResponse(id, "No submit affordance found. Try press_key enter, or click the search suggestion directly.")
+}
+
+private fun findFirstEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+    if (node.isEditable && node.isEnabled) return node
+    for (i in 0 until node.childCount) {
+        val child = node.getChild(i) ?: continue
+        val found = findFirstEditable(child)
+        if (found != null) return found
+    }
+    return null
 }
 
 private fun findSubmitButtons(node: AccessibilityNodeInfo, results: MutableList<AccessibilityNodeInfo>) {
-    val text = node.text?.toString()?.lowercase() ?: ""
-    val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-    
-    if (node.isClickable && (text in listOf("submit", "search", "go", "enter", "send", "ok", "done") ||
-        desc in listOf("submit", "search", "go", "enter", "send", "ok", "done"))) {
+    // Strong, language-agnostic signal: a node that advertises an IME enter
+    // action is by definition the submit target. No label matching required.
+    val advertisesImeEnter = node.actionList.any {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            it.id == AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
+    }
+    if (advertisesImeEnter && node.isEnabled) {
         results.add(node)
     }
-    
+
+    val text = node.text?.toString()?.lowercase() ?: ""
+    val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+    val label = if (text.isNotEmpty()) text else desc
+
+    // Secondary signal: clickable control with a submit-ish label. Kept short —
+    // label matching is locale-dependent, so it is a fallback, not the primary path.
+    val submitWords = setOf(
+        "submit", "search", "go", "send", "ok", "done", "apply", "confirm", "enter",
+        "find", "lookup", "continue", "next"
+    )
+    if (node.isClickable && node.isEnabled && label in submitWords) {
+        results.add(node)
+    }
+
     for (i in 0 until node.childCount) {
         val child = node.getChild(i) ?: continue
         findSubmitButtons(child, results)

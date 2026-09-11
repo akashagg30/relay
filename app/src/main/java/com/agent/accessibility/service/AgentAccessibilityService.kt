@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Akash Agarwal
+//
+// This file is part of Relay, licensed under the GNU Affero General Public
+// License v3.0 or later. See the LICENSE file for details.
+
 package com.agent.accessibility.service
 
 import android.accessibilityservice.AccessibilityService

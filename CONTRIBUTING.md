@@ -89,4 +89,4 @@ concern rather than accumulated in one class.
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
-Apache License 2.0 that covers this project.
+GNU Affero General Public License v3.0 (AGPL-3.0) that covers this project.

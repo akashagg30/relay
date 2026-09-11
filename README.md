@@ -1,10 +1,12 @@
 # Relay — Let AI Agents Test Your Android Apps
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 
 Relay is an MCP server that lets AI agents explore, interact with, and test Android apps. No test scripts needed — just natural language instructions to an AI agent.
 
-**Open Source** — Apache 2.0. Free to use, modify, and distribute. Premium features (Relay Cloud, enterprise, managed hosting) will be proprietary.
+**Open Source (AGPL-3.0)** — Free to use, modify, and self-host. If you offer Relay as a hosted or managed service to others, you must publish your source under the same license. Premium features (Relay Cloud, enterprise, managed hosting) will be proprietary.
+
+**Commercial licensing** — If AGPL doesn't work for your use case, a commercial license is available. Contact: agarwal.akash30@gmail.com
 
 ## Use Cases
 

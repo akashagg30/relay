@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+
+**License: Apache 2.0 → AGPL-3.0**
+
+Relay is now licensed under the GNU Affero General Public License v3.0 or later.
+
+- Free to use, modify, and self-host for any purpose, including commercial.
+- If you offer Relay (or a modified version) as a hosted or managed service to
+  third parties, you must make your source available under the same license.
+- A commercial license is available for organizations that cannot comply with
+  AGPL terms. Contact: agarwal.akash30@gmail.com
+
+Releases **v1.1.0 and earlier remain Apache 2.0** — that grant is irrevocable for
+anyone who obtained those versions. AGPL-3.0 applies from this release forward.
+
 - Split the ~63KB `McpHandler.kt` god-file into focused modules under
   `app/src/main/java/com/agent/accessibility/mcp/`:
   - `McpHandler.kt` — JSON-RPC protocol dispatch and response framing

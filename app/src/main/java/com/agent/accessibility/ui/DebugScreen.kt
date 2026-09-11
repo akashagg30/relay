@@ -14,7 +14,9 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,8 +35,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agent.accessibility.controller.AccessibilityController
+import com.agent.accessibility.mcp.AppInfo
+import com.agent.accessibility.mcp.AppPolicy
+import com.agent.accessibility.mcp.AppRegistry
 import com.agent.accessibility.mcp.McpServerService
 import com.agent.accessibility.mcp.MiuiPermissionHelper
+import com.agent.accessibility.mcp.PolicyMode
 import com.agent.accessibility.service.OverlayButtonService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -218,6 +224,10 @@ fun DebugScreen(controller: AccessibilityController) {
             }
 
 
+
+            item {
+                AppPolicyCard(context = context)
+            }
 
             item {
                 ShareLogsCard(context = context)
@@ -851,4 +861,196 @@ fun SecurityCard(
             }
         }
     }
+}
+
+@Composable
+fun AppPolicyCard(context: Context) {
+    val selfPkg = context.packageName
+    var mode by remember { mutableStateOf(AppPolicy.mode(context)) }
+    var protected by remember { mutableStateOf(AppPolicy.protectedPackages(context)) }
+    var allowed by remember { mutableStateOf(AppPolicy.allowedPackages(context)) }
+    var pickerFor by remember { mutableStateOf<String?>(null) }
+
+    fun saveProtected(next: Set<String>) {
+        protected = next
+        AppPolicy.setProtectedPackages(context, next)
+    }
+    fun saveAllowed(next: Set<String>) {
+        allowed = next
+        AppPolicy.setAllowedPackages(context, next)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("App Access", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Blocked apps are both unreadable and untouchable by the AI agent. " +
+                    "Only you can change this list — the agent can read it but never edit it.",
+                fontSize = 12.sp, color = Color(0xFFAAAAAA)
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // Relay itself: invariant, not removable
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Relay", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFF8A80))
+                    Text(selfPkg, fontSize = 10.sp, color = Color(0xFF777777), fontFamily = FontFamily.Monospace)
+                }
+                Text("ALWAYS BLOCKED", fontSize = 10.sp, color = Color(0xFF777777))
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "Relay is locked so the agent cannot disable the service or rewrite this policy.",
+                fontSize = 11.sp, color = Color(0xFF777777)
+            )
+
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF333333)))
+            Spacer(Modifier.height(12.dp))
+
+            // Mode
+            Text("Mode", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = mode == PolicyMode.ALL,
+                    onClick = { mode = PolicyMode.ALL; AppPolicy.setMode(context, PolicyMode.ALL) }
+                )
+                Text("All apps, except protected", fontSize = 13.sp, color = Color.White)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = mode == PolicyMode.ALLOWLIST,
+                    onClick = { mode = PolicyMode.ALLOWLIST; AppPolicy.setMode(context, PolicyMode.ALLOWLIST) }
+                )
+                Text("Only selected apps", fontSize = 13.sp, color = Color.White)
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF333333)))
+            Spacer(Modifier.height(12.dp))
+
+            Text("Protected apps (${protected.size})", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
+            Spacer(Modifier.height(4.dp))
+            if (protected.isEmpty()) {
+                Text("None", fontSize = 12.sp, color = Color(0xFF777777))
+            }
+            protected.sorted().forEach { pkg ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        pkg, fontSize = 11.sp, color = Color(0xFFCCCCCC),
+                        fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { saveProtected(protected - pkg) }) {
+                        Text("Remove", fontSize = 11.sp, color = Color(0xFFEF9A9A))
+                    }
+                }
+            }
+            Row {
+                TextButton(onClick = { pickerFor = "protected" }) { Text("Add apps", fontSize = 12.sp) }
+                TextButton(onClick = { saveProtected(AppPolicy.sensitiveDefaults()) }) {
+                    Text("Restore defaults", fontSize = 12.sp)
+                }
+            }
+
+            if (mode == PolicyMode.ALLOWLIST) {
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF333333)))
+                Spacer(Modifier.height(12.dp))
+                Text("Allowed apps (${allowed.size})", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                Spacer(Modifier.height(4.dp))
+                if (allowed.isEmpty()) {
+                    Text(
+                        "None — the agent cannot act on any app in this mode.",
+                        fontSize = 12.sp, color = Color(0xFFFFAB91)
+                    )
+                }
+                allowed.sorted().forEach { pkg ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            pkg, fontSize = 11.sp, color = Color(0xFFCCCCCC),
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { saveAllowed(allowed - pkg) }) {
+                            Text("Remove", fontSize = 11.sp, color = Color(0xFFEF9A9A))
+                        }
+                    }
+                }
+                TextButton(onClick = { pickerFor = "allowed" }) { Text("Add apps", fontSize = 12.sp) }
+            }
+        }
+    }
+
+    pickerFor?.let { target ->
+        AppPickerDialog(
+            context = context,
+            title = if (target == "protected") "Protect apps" else "Allow apps",
+            selected = if (target == "protected") protected else allowed,
+            onToggle = { pkg, on ->
+                val base = if (target == "protected") protected else allowed
+                val next = if (on) base + pkg else base - pkg
+                if (target == "protected") saveProtected(next) else saveAllowed(next)
+            },
+            onDismiss = { pickerFor = null }
+        )
+    }
+}
+
+@Composable
+private fun AppPickerDialog(
+    context: Context,
+    title: String,
+    selected: Set<String>,
+    onToggle: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val apps = remember { AppRegistry(context).getLaunchableApps().sortedBy { it.name.lowercase() } }
+    var query by remember { mutableStateOf("") }
+    val filtered = apps.filter {
+        query.isBlank() ||
+            it.name.contains(query, ignoreCase = true) ||
+            it.packageName.contains(query, ignoreCase = true)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("$title (${selected.size} selected)") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search apps") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(filtered) { app: AppInfo ->
+                        val checked = app.packageName in selected
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggle(app.packageName, !checked) }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Checkbox(checked = checked, onCheckedChange = { onToggle(app.packageName, it) })
+                            Column(Modifier.weight(1f)) {
+                                Text(app.name, fontSize = 14.sp, color = Color.White)
+                                Text(
+                                    app.packageName, fontSize = 10.sp, color = Color(0xFF888888),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }
+    )
 }

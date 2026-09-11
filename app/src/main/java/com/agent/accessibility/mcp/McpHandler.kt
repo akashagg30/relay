@@ -104,6 +104,18 @@ class McpHandler(internal val context: Context) {
 
         Log.d(TAG, "Tool call: $toolName args=${args.toString().take(200)}")
 
+        // App access policy gate. Single choke point for every gated tool.
+        // back / home / current_app are intentionally not gated so the agent can
+        // always escape a blocked app.
+        if (toolName in POLICY_GATED_TOOLS) {
+            val target = policyTargetPackage(toolName, args)
+            if (target != null && !AppPolicy.isAllowed(context, target)) {
+                Log.w(TAG, "Policy blocked $toolName on $target")
+                auditLogger.log(toolName, false, "policy_blocked", 0, "policy_blocked: $target")
+                return toolErrorResponse(id, AppPolicy.blockMessage(target))
+            }
+        }
+
         return when (toolName) {
             "get_screen_state" -> getScreenState(id)
             "click_node" -> clickNode(id, args)
@@ -132,6 +144,7 @@ class McpHandler(internal val context: Context) {
             "share_logs" -> shareLogs(id)
             "take_screenshot" -> takeScreenshot(id)
             "screenshot_with_overlay" -> screenshotWithOverlay(id)
+            "get_app_policy" -> getAppPolicy(id)
             else -> errorResponse(id, "Unknown tool: $toolName")
         }
     }

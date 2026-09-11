@@ -184,6 +184,14 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "Use this when you need VLM-style visual understanding of the screen with element annotations.",
         JSONObject()))
 
+    tools.put(toolDef("get_app_policy",
+        "Read the user's app access policy. READ-ONLY — an agent cannot change this; " +
+        "only the user can, in the Relay app under App Access. " +
+        "Apps in `protected` or `alwaysBlocked` are both unreadable and unactionable: " +
+        "any gated tool aimed at them fails with a `policy_blocked:` error. " +
+        "If you hit that error, stop retrying — it is a user decision, not a bug.",
+        JSONObject()))
+
     return tools
 }
 

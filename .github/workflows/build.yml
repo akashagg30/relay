@@ -57,8 +57,29 @@ jobs:
           path: app/build/reports/tests/
           retention-days: 7
 
+      - name: Decode signing keystore
+        run: |
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "KEYSTORE_BASE64 not set — falling back to default debug signing."
+            exit 0
+          fi
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/relay.keystore"
+          test -s "$RUNNER_TEMP/relay.keystore"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/relay.keystore" >> "$GITHUB_ENV"
+
       - name: Build Debug APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleDebug --no-daemon
+
+      - name: Report APK signature
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "APK: $APK"
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$APK" 2>/dev/null \
+            | grep -i "SHA-256" | head -2 || echo "(signature details unavailable)"
 
       - name: Find APK
         id: find_apk

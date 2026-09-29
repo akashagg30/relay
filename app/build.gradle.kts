@@ -10,6 +10,27 @@ val commitCount = providers.exec {
     commandLine("git", "rev-list", "--count", "HEAD")
 }.standardOutput.asText.get().trim().toIntOrNull() ?: 1
 
+// Fixed signing key so a build can be installed OVER a previous one.
+//
+// Without this, AGP auto-generates a debug keystore per machine — and since every
+// GitHub Actions run is a fresh runner, every build was signed with a different
+// key. Android refuses to update an app whose signature changed, failing with
+// "App not installed as package conflicts with an existing package", so the old
+// build had to be uninstalled (losing its data) before each install.
+//
+// The key lives in GitHub secrets; the workflow decodes it and points
+// KEYSTORE_PATH at it. When those vars are absent (plain local build) we fall
+// back to the default debug signing so `./gradlew assembleDebug` still works.
+val keystorePath = System.getenv("KEYSTORE_PATH")
+val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+val signingKeyAlias = System.getenv("KEY_ALIAS") ?: "relay"
+val signingKeyPassword = System.getenv("KEY_PASSWORD")
+
+val hasStableSigning = !keystorePath.isNullOrBlank() &&
+    !keystorePassword.isNullOrBlank() &&
+    file(keystorePath).exists() &&
+    file(keystorePath).length() > 0L
+
 android {
     namespace = "com.agent.accessibility"
     compileSdk = 35
@@ -24,8 +45,27 @@ android {
         buildConfigField("String", "APP_VERSION", "\"1.0.$commitCount\"")
     }
 
+    signingConfigs {
+        if (hasStableSigning) {
+            create("stable") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword ?: keystorePassword
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (hasStableSigning) {
+                signingConfig = signingConfigs.getByName("stable")
+            }
+        }
         release {
+            if (hasStableSigning) {
+                signingConfig = signingConfigs.getByName("stable")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

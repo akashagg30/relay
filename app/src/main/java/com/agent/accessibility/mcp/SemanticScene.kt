@@ -154,14 +154,42 @@ enum class PresentationState(val value: String) {
     HIDDEN("hidden")
 }
 
+/**
+ * Element bounds.
+ *
+ * Carries BOTH a coarse semantic hint and the real pixel rect.
+ *
+ * The hint is a readability aid for callers reasoning about layout in words; the
+ * pixel rect is what actually makes coordinate-based fallback correct. Only the
+ * hint was retained originally, which meant coordinate_fallback had to reverse-
+ * engineer a guess from words like "left"/"top" and routinely missed the target
+ * while still reporting success.
+ */
 data class BoundsHint(
     val position: String,
-    val vertical: String
+    val vertical: String,
+    val left: Int = -1,
+    val top: Int = -1,
+    val right: Int = -1,
+    val bottom: Int = -1
 ) {
+    /** True when the real pixel rect is known and usable. */
+    val hasPixels: Boolean get() = left >= 0 && top >= 0 && right > left && bottom > top
+
+    /** Centre point of the real rect, for direct use as a tap target. */
+    val centerX: Int get() = (left + right) / 2
+    val centerY: Int get() = (top + bottom) / 2
+
     fun toJson(): JSONObject {
         return JSONObject().apply {
             put("position", position)
             put("vertical", vertical)
+            if (hasPixels) {
+                put("x", left)
+                put("y", top)
+                put("width", right - left)
+                put("height", bottom - top)
+            }
         }
     }
 
@@ -179,7 +207,7 @@ data class BoundsHint(
                 bottom > screenH * 0.8 -> "bottom"
                 else -> "middle"
             }
-            return BoundsHint(position, vertical)
+            return BoundsHint(position, vertical, left, top, right, bottom)
         }
     }
 }

@@ -697,19 +697,28 @@ internal fun McpHandler.pressKey(id: String, args: JSONObject): String {
         }
     }
 
-    // For enter key, try clicking the focused node
-    if (key.lowercase() in listOf("enter", "return")) {
+    // For enter/return, prefer the IME enter action over a raw key event.
+    //
+    // A global `input keyevent KEYCODE_ENTER` is injected into the input pipeline
+    // and frequently never reaches the view holding IME focus — the field shows
+    // focused, the key is reported sent, and nothing is committed. ACTION_IME_ENTER
+    // is what tapping the keyboard's Go/Enter key does, so it is the correct
+    // semantic action. This mirrors the submit tool.
+    if (key.lowercase() in listOf("enter", "return") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val focusedWindow = service.rootInActiveWindow
         if (focusedWindow != null) {
-            val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val focused = focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                ?: focusedWindow.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             if (focused != null) {
-                val clickResult = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.d(TAG, "Press key: $key (click on focused node: $clickResult)")
-                if (clickResult) {
+                val imeResult = focused.performAction(
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
+                )
+                Log.d(TAG, "Press key: $key (ACTION_IME_ENTER on focused node: $imeResult)")
+                if (imeResult) {
                     return toolSuccessResponse(id, JSONObject().apply {
                         put("success", true)
                         put("key", key)
-                        put("method", "click_focused")
+                        put("method", "ime_enter")
                     }.toString())
                 }
             }

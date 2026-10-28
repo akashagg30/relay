@@ -230,6 +230,10 @@ fun DebugScreen(controller: AccessibilityController) {
             }
 
             item {
+                GoalEngineSettingsCard()
+            }
+
+            item {
                 ShareLogsCard(context = context)
             }
         }

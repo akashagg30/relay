@@ -7,6 +7,8 @@
 package com.agent.accessibility.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -35,6 +37,9 @@ class AgentAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         Log.d(TAG, "AccessibilityService connected")
+        val gestures = serviceInfo?.capabilities?.and(AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES) != 0
+        Log.d(TAG, "canPerformGestures=$gestures")
+        Log.d(TAG, "device=${Build.MANUFACTURER} ${Build.MODEL} release=${Build.VERSION.RELEASE} sdk=${Build.VERSION.SDK_INT}")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

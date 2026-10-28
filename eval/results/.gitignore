@@ -1,0 +1,3 @@
+# Raw per-run JSON audit trails embed real on-screen UI text and are
+# intentionally NOT committed. Commit the .md report only.
+*.json

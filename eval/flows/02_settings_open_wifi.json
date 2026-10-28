@@ -1,0 +1,1 @@
+{"expected_actions": [{"action": "click_node", "text_contains": "Wi-Fi"}], "expected_final": "done", "goal": "open Wi-Fi settings", "maxSteps": 5, "name": "settings_open_wifi", "setup": [{"args": {"name": "Settings"}, "tool": "open_app"}, {"args": {"milliseconds": 1200}, "tool": "wait"}]}

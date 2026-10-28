@@ -1,0 +1,1 @@
+{"expected_actions": [{"action": "swipe", "text_contains": null}], "expected_final": "done", "goal": "scroll to \"About phone\"", "maxSteps": 5, "name": "settings_scroll_find", "setup": [{"args": {"name": "Settings"}, "tool": "open_app"}, {"args": {"milliseconds": 1200}, "tool": "wait"}]}

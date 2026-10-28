@@ -1,0 +1,1 @@
+{"expected_actions": [{"action": "input_text", "text_contains": "example.com"}, {"action": "submit", "text_contains": null}], "expected_final": "done", "goal": "open \"example.com\"", "maxSteps": 5, "name": "chrome_navigate", "setup": [{"args": {"name": "Chrome"}, "tool": "open_app"}, {"args": {"milliseconds": 1500}, "tool": "wait"}]}

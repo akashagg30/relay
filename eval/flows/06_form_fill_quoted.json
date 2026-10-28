@@ -1,0 +1,1 @@
+{"expected_actions": [{"action": "click_node", "text_contains": "Search"}, {"action": "input_text", "text_contains": "relay"}], "expected_final": "done", "goal": "type \"relay\" into the search field", "maxSteps": 5, "name": "form_fill_quoted", "setup": [{"args": {"name": "Settings"}, "tool": "open_app"}, {"args": {"milliseconds": 1200}, "tool": "wait"}]}

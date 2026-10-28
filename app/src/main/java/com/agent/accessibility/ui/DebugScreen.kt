@@ -59,6 +59,7 @@ fun DebugScreen(controller: AccessibilityController) {
     var auditLogs by remember { mutableStateOf(McpServerService.instance?.getAuditLogs(10) ?: emptyList()) }
     var tunnelRunning by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.isRunning == true) }
     var tunnelUrl by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.publicUrl) }
+    var tunnelError by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.lastError) }
     var overlayRunning by remember { mutableStateOf(OverlayButtonService.isRunning) }
     var isMiui by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -78,6 +79,7 @@ fun DebugScreen(controller: AccessibilityController) {
             auditLogs = McpServerService.instance?.getAuditLogs(10) ?: emptyList()
             tunnelRunning = McpServerService.instance?.cloudflareTunnel?.isRunning == true
             tunnelUrl = McpServerService.instance?.cloudflareTunnel?.publicUrl
+            tunnelError = McpServerService.instance?.cloudflareTunnel?.lastError
             overlayRunning = OverlayButtonService.isRunning
             delay(1000)
         }
@@ -161,6 +163,7 @@ fun DebugScreen(controller: AccessibilityController) {
                 CloudflareTunnelCard(
                     isTunnelRunning = tunnelRunning,
                     publicUrl = tunnelUrl,
+                    tunnelError = tunnelError,
                     isMcpRunning = isMcpRunning,
                     onStartTunnel = {
                         val intent = Intent(context, McpServerService::class.java).apply {
@@ -482,6 +485,7 @@ fun McpServerCard(
 fun CloudflareTunnelCard(
     isTunnelRunning: Boolean,
     publicUrl: String?,
+    tunnelError: String?,
     isMcpRunning: Boolean,
     onStartTunnel: () -> Unit,
     onStopTunnel: () -> Unit,
@@ -537,6 +541,16 @@ fun CloudflareTunnelCard(
                 ) {
                     Text("COPY URL")
                 }
+            }
+
+            if (tunnelError != null) {
+                Text(
+                    text = tunnelError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFF44336),
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 3
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))

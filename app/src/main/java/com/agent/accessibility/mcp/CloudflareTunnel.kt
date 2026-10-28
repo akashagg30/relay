@@ -7,23 +7,40 @@
 package com.agent.accessibility.mcp
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
-import kotlinx.coroutines.*
-import java.io.BufferedReader
 import java.io.File
 
 /**
- * Manages a Cloudflare Quick Tunnel (cloudflared) process.
- * Creates a public HTTPS URL that proxies to localhost:8765.
- * No Cloudflare account required — URL changes on each restart.
+ * Thin Android shell over [TunnelProcess], which owns the whole cloudflared
+ * lifecycle and is unit-tested on the JVM.
+ *
+ * The bundled cloudflared binary (libcloudflared.so) is executed **in place**
+ * from `applicationInfo.nativeLibraryDir` (an executable apk_data_file
+ * mapping). It must NOT be copied to cacheDir first: app-data files lose
+ * their executable mapping under W^X policy on Android 10+ with targetSdk 35,
+ * so exec-after-copy fails with EACCES. `HOME` still points at
+ * `context.cacheDir` so cloudflared has a writable home.
+ *
+ * The tunnel forwards to the caller's port: [start] takes the MCP server's
+ * actual listening port (no hardcoded port here).
  */
-class CloudflareTunnel(private val context: Context) {
+class CloudflareTunnel(
+    private val context: Context,
+    tunnelFactory: (
+        onUrl: (String) -> Unit,
+        onExit: (Int) -> Unit,
+        onError: (String) -> Unit,
+        log: (String) -> Unit
+    ) -> TunnelProcess = { onUrl, onExit, onError, log ->
+        TunnelProcess(onUrl = onUrl, onExit = onExit, onError = onError, log = log)
+    }
+) {
 
     companion object {
         private const val TAG = "CloudflareTunnel"
         private const val BINARY_NAME = "libcloudflared.so"
-        private const val LOCAL_URL = "http://localhost:8765"
-        private val URL_REGEX = Regex("""https://[a-zA-Z0-9-]+\.trycloudflare\.com[^\s]*""")
     }
 
     interface Listener {
@@ -32,177 +49,69 @@ class CloudflareTunnel(private val context: Context) {
         fun onError(error: String) {}
     }
 
-    private var process: Process? = null
-    private var readerJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    var isRunning: Boolean = false
-        private set
-
-    var publicUrl: String? = null
-        private set
+    private val tunnel: TunnelProcess = tunnelFactory(
+        { url -> mainHandler.post { listener?.onUrlAvailable(url) } },
+        { _ -> mainHandler.post { listener?.onStopped() } },
+        { err ->
+            lastError = err
+            mainHandler.post { listener?.onError(err) }
+        },
+        { msg -> Log.d(TAG, msg) }
+    )
 
     var listener: Listener? = null
 
+    @Volatile
+    var lastError: String? = null
+        private set
+
+    /** Real process state from [TunnelProcess]; never a flag set optimistically. */
+    val isRunning: Boolean
+        get() = tunnel.isRunning
+
+    val publicUrl: String?
+        get() = tunnel.publicUrl
+
     /**
-     * Start the cloudflared tunnel process.
-     * Copies the binary from nativeLibraryDir to a writable location and executes it.
+     * Starts the tunnel forwarding to the given local [port].
      */
-    fun start() {
-        if (isRunning) {
+    fun start(port: Int) {
+        if (tunnel.isRunning) {
             Log.w(TAG, "Tunnel already running")
             return
         }
+        lastError = null
 
-        try {
-            val binaryFile = prepareBinary() ?: run {
-                listener?.onError("Failed to prepare cloudflared binary")
-                return
-            }
-
-            // Make binary executable
-            binaryFile.setExecutable(true, false)
-
-            Log.d(TAG, "Starting cloudflared from: ${binaryFile.absolutePath}")
-
-            val pb = ProcessBuilder(
-                binaryFile.absolutePath,
-                "tunnel",
-                "--url", LOCAL_URL
-            )
-            pb.redirectErrorStream(false)
-            pb.environment()["HOME"] = context.cacheDir.absolutePath
-
-            process = pb.start()
-            isRunning = true
-
-            // Read stdout for URL in background
-            readerJob = scope.launch {
-                try {
-                    val reader = process!!.inputStream.bufferedReader()
-                    readOutput(reader)
-                } catch (e: Exception) {
-                    if (isActive) {
-                        Log.e(TAG, "Error reading tunnel output", e)
-                    }
-                }
-            }
-
-            // Also read stderr for errors
-            scope.launch {
-                try {
-                    val reader = process!!.errorStream.bufferedReader()
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        Log.d(TAG, "stderr: $line")
-                    }
-                } catch (e: Exception) {
-                    if (isActive) {
-                        Log.e(TAG, "Error reading tunnel stderr", e)
-                    }
-                }
-            }
-
-            // Wait for process exit in background
-            scope.launch {
-                try {
-                    val exitCode = process!!.waitFor()
-                    Log.d(TAG, "cloudflared exited with code: $exitCode")
-                } catch (e: Exception) {
-                    Log.d(TAG, "Process wait interrupted")
-                } finally {
-                    withContext(Dispatchers.Main) {
-                        stop()
-                        listener?.onStopped()
-                    }
-                }
-            }
-
-            Log.d(TAG, "Tunnel process started")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start tunnel", e)
-            isRunning = false
-            listener?.onError("Failed to start tunnel: ${e.message}")
+        val exe = File(context.applicationInfo.nativeLibraryDir, BINARY_NAME)
+        if (!exe.exists()) {
+            val msg = "cloudflared binary not found at ${exe.absolutePath}"
+            Log.e(TAG, msg)
+            lastError = msg
+            listener?.onError(msg)
+            return
         }
+
+        Log.d(TAG, "Starting cloudflared in place: ${exe.absolutePath} (port=$port)")
+        tunnel.start(exe.absolutePath, port, context.cacheDir)
     }
 
     /**
-     * Stop the cloudflared tunnel process.
+     * Stops the tunnel.
      */
     fun stop() {
-        if (!isRunning) return
-
-        isRunning = false
-        publicUrl = null
-        readerJob?.cancel()
-        readerJob = null
-
-        try {
-            process?.destroyForcibly()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error destroying process", e)
-        }
-        process = null
+        if (!tunnel.isRunning) return
+        tunnel.stop()
         Log.d(TAG, "Tunnel stopped")
+        listener?.onStopped()
     }
 
     /**
-     * Destroy the tunnel and clean up resources.
+     * Stops the tunnel and releases resources.
      */
     fun destroy() {
-        stop()
-        scope.cancel()
-    }
-
-    private fun readOutput(reader: BufferedReader) {
-        var line: String?
-        while (reader.readLine().also { line = it } != null) {
-            val l = line ?: continue
-            Log.d(TAG, "stdout: $l")
-
-            // Check for the public URL
-            if (publicUrl == null) {
-                val match = URL_REGEX.find(l)
-                if (match != null) {
-                    publicUrl = match.value
-                    Log.d(TAG, "URL found: $publicUrl")
-                    // Notify on main thread
-                    scope.launch(Dispatchers.Main) {
-                        listener?.onUrlAvailable(publicUrl!!)
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Copy the bundled binary to a writable location.
-     * Returns the File object or null on failure.
-     */
-    private fun prepareBinary(): File? {
-        val nativeDir = context.applicationInfo.nativeLibraryDir
-        val sourceFile = File(nativeDir, BINARY_NAME)
-
-        // If the binary exists in nativeLibraryDir (extracted by Android), use it directly
-        if (sourceFile.exists()) {
-            Log.d(TAG, "Binary found in nativeLibraryDir: ${sourceFile.absolutePath}")
-            // Copy to cache dir since native dir may be read-only on some devices
-            val cacheFile = File(context.cacheDir, "cloudflared")
-            if (!cacheFile.exists() || cacheFile.length() != sourceFile.length()) {
-                sourceFile.copyTo(cacheFile, overwrite = true)
-            }
-            return cacheFile
-        }
-
-        // Fallback: check if it was already copied to cache
-        val cacheFile = File(context.cacheDir, "cloudflared")
-        if (cacheFile.exists() && cacheFile.canExecute()) {
-            Log.d(TAG, "Using cached binary: ${cacheFile.absolutePath}")
-            return cacheFile
-        }
-
-        Log.e(TAG, "Binary not found at: ${sourceFile.absolutePath}")
-        Log.e(TAG, "nativeLibraryDir contents: ${File(nativeDir).list()?.toList()}")
-        return null
+        tunnel.stop()
+        Log.d(TAG, "Tunnel destroyed")
     }
 }

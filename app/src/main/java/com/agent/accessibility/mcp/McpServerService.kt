@@ -17,7 +17,6 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import java.io.File
 import com.agent.accessibility.MainActivity
 import org.json.JSONArray
 import org.json.JSONObject
@@ -76,6 +75,11 @@ class McpServerService : Service() {
         consentPrefs = getSharedPreferences("mcp_consent", Context.MODE_PRIVATE)
         authToken = authManager.token
         cloudflareTunnel = CloudflareTunnel(this)
+        cloudflareTunnel?.listener = object : CloudflareTunnel.Listener {
+            override fun onUrlAvailable(url: String) = startForegroundWithNotification()
+            override fun onStopped() = startForegroundWithNotification()
+            override fun onError(error: String) = startForegroundWithNotification()
+        }
         Log.d(TAG, "MCP Server service created")
     }
 
@@ -501,74 +505,34 @@ class McpServerService : Service() {
         saveApprovedClients(approvedClients)
     }
 
-    private var cloudflaredProcess: Process? = null
-    private var cloudflaredUrl: String? = null
-
+    /**
+     * Starts the single Cloudflare tunnel implementation ([CloudflareTunnel],
+     * backed by [TunnelProcess]) forwarding to the MCP server's port.
+     */
     fun startTunnel() {
         if (!isRunning) {
             Log.w(TAG, "Cannot start tunnel: MCP server not running")
             return
         }
-        if (cloudflaredProcess != null) {
+        if (cloudflareTunnel?.isRunning == true) {
             Log.w(TAG, "Tunnel already running")
             return
         }
-        
-        try {
-            val binaryFile = File(applicationInfo.nativeLibraryDir, "libcloudflared.so")
-            if (!binaryFile.exists()) {
-                Log.e(TAG, "cloudflared binary not found")
-                return
-            }
-            
-            // Copy to cache and make executable
-            val cacheFile = File(cacheDir, "cloudflared")
-            binaryFile.copyTo(cacheFile, overwrite = true)
-            cacheFile.setExecutable(true, false)
-            
-            val pb = ProcessBuilder(
-                cacheFile.absolutePath,
-                "tunnel",
-                "--url", "http://127.0.0.1:$port"
-            )
-            pb.redirectErrorStream(false)
-            pb.environment()["HOME"] = cacheDir.absolutePath
-            
-            cloudflaredProcess = pb.start()
-            Log.d(TAG, "cloudflared process started")
-            
-            // Read stdout for URL
-            Thread {
-                try {
-                    val reader = cloudflaredProcess!!.inputStream.bufferedReader()
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        Log.d(TAG, "cloudflared: $line")
-                        val match = if (line != null && "trycloudflare.com" in line) line else null
-                        if (match != null) {
-                            cloudflaredUrl = match
-                            Log.d(TAG, "Tunnel URL: $cloudflaredUrl")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error reading cloudflared output", e)
-                }
-            }.start()
-            
-            // Update notification
-            startForegroundWithNotification()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start tunnel", e)
-        }
+        cloudflareTunnel?.start(port)
+        Log.d(TAG, "Tunnel start requested")
+        startForegroundWithNotification()
     }
 
     fun stopTunnel() {
-        cloudflaredProcess?.destroyForcibly()
-        cloudflaredProcess = null
-        cloudflaredUrl = null
+        cloudflareTunnel?.stop()
         Log.d(TAG, "Tunnel stopped")
         startForegroundWithNotification()
     }
+
+    /**
+     * Current public tunnel URL, or null when the tunnel is not publishing one.
+     */
+    fun getTunnelUrl(): String? = cloudflareTunnel?.publicUrl
 
     fun regenerateAuthToken(): String {
         val newToken = authManager.regenerateToken()
@@ -702,7 +666,7 @@ class McpServerService : Service() {
 
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Relay MCP Server")
-            .setContentText(buildString { append("Port $port"); cloudflaredUrl?.let { append(" | Tunnel: $it") } })
+            .setContentText(buildString { append("Port $port"); cloudflareTunnel?.publicUrl?.let { append(" | Tunnel: $it") } })
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

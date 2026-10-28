@@ -193,7 +193,8 @@ internal val POLICY_GATED_TOOLS = setOf(
     "take_screenshot",
     "screenshot_with_overlay",
     "launch_app",
-    "open_app"
+    "open_app",
+    "act_toward_goal"
 )
 
 /**

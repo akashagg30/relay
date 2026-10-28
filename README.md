@@ -146,6 +146,7 @@ Response:
 | `find` | `text`, `role` | Searches the last `observe()` result for a matching element |
 | `scroll_until` | `text`, `direction`, `maxScrolls` | Scrolls until an element with matching text is visible |
 | `diag_sealed` | `elementId` | Diagnostic: tests node sealed lifecycle (development aid) |
+| `act_toward_goal` | `goal`, `maxSteps`, `confidenceThreshold`, `pauseBeforeKeywords` | Bounded on-device perceive-decide-act loop; returns one of `done\|escalate\|paused\|stuck\|blocked\|max_steps` (`escalate` includes fresh element IDs ready for immediate use) |
 
 ## Example MCP Request
 

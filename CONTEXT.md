@@ -66,7 +66,7 @@ Phase 3 — Security hardening complete. MCP server with authentication, rate li
 | `app/src/main/java/com/agent/accessibility/ui/DebugScreen.kt` | Compose debug UI with all controls |
 | `app/src/main/AndroidManifest.xml` | Permissions, service declarations, `<queries>` |
 
-## MCP Tools (14)
+## MCP Tools (28)
 
 | Tool | Input | Description |
 |------|-------|-------------|
@@ -84,6 +84,30 @@ Phase 3 — Security hardening complete. MCP server with authentication, rate li
 | `search_apps` | `query` | Search installed apps by name |
 | `open_app` | `name` | Open app by human-readable name |
 | `current_app` | — | Returns currently foreground app |
+| `act_toward_goal` | `goal`, `maxSteps`, `confidenceThreshold`, `pauseBeforeKeywords` | Bounded on-device perceive-decide-act loop toward a goal (see Goal micro-loop) |
+
+### Goal micro-loop
+
+`act_toward_goal` runs a bounded on-device loop: snapshot the screen
+(`observeInternal`, which stores a fresh `NodeResolver` snapshot so the IDs it
+returns are immediately clickable), pick an element with the configured engine,
+act via the existing `click_node` / `input_text` / `submit` / `back` impls,
+settle 400 ms, re-snapshot, and verify in code (every non-stopword goal token
+in the new screen's visible text — no model call).
+
+- Engine tiers: A `heuristic` (default, deterministic local scorer) / B `jev`
+  (frontier System-1 model with a user-supplied key; missing key or any failure
+  degrades to the heuristic with an explicit `fallbackReason`, never silently).
+- Six terminal statuses: `done|escalate|paused|stuck|blocked|max_steps`.
+- Strict guard order before every action: PAUSE keyword → low confidence
+  (escalate) → destructive keyword (block) → 3 unchanged screens (stuck).
+- Escalation takeover contract: on `escalate` only, the response carries fresh
+  `elementIds` in `observe()` format taken from a snapshot *after* the last
+  action, so the frontier can `click_node` one immediately without calling
+  `observe()` again. Every other status returns `elementIds: []`.
+- Audit: every decision is appended to `filesDir/goal_decisions.jsonl` (one JSON
+  object per line, single rotation to `goal_decisions.1.jsonl`). The raw goal
+  text is never logged — only the first 16 hex chars of its SHA-256.
 
 ## MCP Protocol
 

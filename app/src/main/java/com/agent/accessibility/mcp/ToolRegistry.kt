@@ -188,6 +188,8 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "If you hit that error, stop retrying — it is a user decision, not a bug.",
         JSONObject()))
 
+    tools.put(goalToolDef())
+
     return tools
 }
 

@@ -145,6 +145,7 @@ class McpHandler(internal val context: Context) {
             "take_screenshot" -> takeScreenshot(id)
             "screenshot_with_overlay" -> screenshotWithOverlay(id)
             "get_app_policy" -> getAppPolicy(id)
+            "act_toward_goal" -> actTowardGoal(id, args)
             else -> errorResponse(id, "Unknown tool: $toolName")
         }
     }

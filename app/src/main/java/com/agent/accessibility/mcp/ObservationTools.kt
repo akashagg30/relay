@@ -801,6 +801,53 @@ private fun isKeyguardWindowType(windowType: Int): Boolean {
     return windowType == kg
 }
 
+/**
+ * One com.android.systemui root competing to be the keyguard root, as pure
+ * primitives (no Android types) so the ranking stays JVM-testable.
+ *
+ * status/nav/shade windows are systemui too, and the keyguard reports
+ * TYPE_SYSTEM on current builds (the hidden keyguard type is not in the
+ * public enum), so area -- not type -- is the discriminator: the keyguard is
+ * full-screen, bars and shades are strips. The active root carries no window
+ * layer, so it ranks below windowed candidates on exact area ties and only
+ * wins residual full ties via the isActive preference.
+ */
+internal data class KeyguardWindowCandidate(
+    val isActive: Boolean,
+    val keyguardTypeMatch: Boolean,
+    val areaPx: Int,
+    val layer: Int
+)
+
+/** Window-layer placeholder for the active root, which has no window/layer. */
+internal const val ACTIVE_ROOT_NO_LAYER = Int.MIN_VALUE
+
+/**
+ * Ranks systemui candidates: (a) a resolvable keyguard window-type match
+ * first, else (b) the largest getBoundsInScreen() area, tie-break (c) the
+ * highest window.getLayer(), then (d) the active root. Returns the winning
+ * index, or null when the list is empty (caller reports rootSource "none").
+ */
+internal fun selectKeyguardCandidate(candidates: List<KeyguardWindowCandidate>): Int? {
+    if (candidates.isEmpty()) return null
+    var best = 0
+    for (i in 1 until candidates.size) {
+        if (compareKeyguardCandidates(candidates[i], candidates[best]) > 0) best = i
+    }
+    return best
+}
+
+private fun compareKeyguardCandidates(
+    a: KeyguardWindowCandidate,
+    b: KeyguardWindowCandidate
+): Int {
+    if (a.keyguardTypeMatch != b.keyguardTypeMatch) return if (a.keyguardTypeMatch) 1 else -1
+    if (a.areaPx != b.areaPx) return a.areaPx.compareTo(b.areaPx)
+    if (a.layer != b.layer) return a.layer.compareTo(b.layer)
+    if (a.isActive != b.isActive) return if (a.isActive) 1 else -1
+    return 0
+}
+
 private fun walkDigitNodes(node: AccessibilityNodeInfo, onDigit: (Char) -> Unit) {
     val d = runCatching {
         digitFromNodeFields(
@@ -844,29 +891,55 @@ internal fun McpHandler.unlockDiagnose(id: String): String {
     var rootSource = "none"
     val activeRoot = runCatching { findForegroundRoot(service) }.getOrNull()
     try {
-        if (activeRoot != null && activeRoot.packageName?.toString() == SYSTEMUI_PACKAGE) {
-            root = activeRoot
-            rootSource = "activeWindow"
-        } else {
-            var picked: AccessibilityNodeInfo? = null
-            var pickedKeyguard = false
-            for (window in runCatching { service.windows }.getOrDefault(emptyList())) {
-                val wr = runCatching { window.root }.getOrNull() ?: continue
-                if (wr.packageName?.toString() == SYSTEMUI_PACKAGE) {
-                    val isKg = isKeyguardWindowType(window.type)
-                    if (picked == null || (isKg && !pickedKeyguard)) {
-                        safeRecycleNode(picked)
-                        picked = wr
-                        pickedKeyguard = isKg
-                    } else {
-                        safeRecycleNode(wr)
-                    }
-                } else {
-                    safeRecycleNode(wr)
+        // Every systemui root competes: the active root (when systemui) plus
+        // each window root whose package is systemui. Non-systemui roots are
+        // freed inline; losers are freed after ranking; the winner is freed in
+        // the outer finally. Identity-deduped: the active root instance may
+        // also surface as a window root, and must have exactly one owner.
+        val candidateNodes = mutableListOf<AccessibilityNodeInfo>()
+        val candidateMeta = mutableListOf<KeyguardWindowCandidate>()
+        fun addCandidate(
+            node: AccessibilityNodeInfo,
+            isActive: Boolean,
+            windowType: Int?,
+            windowLayer: Int
+        ) {
+            val dup = candidateNodes.indexOfFirst { it === node }
+            if (dup >= 0) {
+                if (isActive && !candidateMeta[dup].isActive) {
+                    candidateMeta[dup] = candidateMeta[dup].copy(isActive = true)
                 }
+                return
             }
-            root = picked
-            if (picked != null) rootSource = "windowList"
+            val b = Rect()
+            runCatching { node.getBoundsInScreen(b) }
+            val area = b.width().coerceAtLeast(0) * b.height().coerceAtLeast(0)
+            val kgMatch = windowType != null && isKeyguardWindowType(windowType)
+            candidateNodes.add(node)
+            candidateMeta.add(KeyguardWindowCandidate(isActive, kgMatch, area, windowLayer))
+        }
+        if (activeRoot != null && activeRoot.packageName?.toString() == SYSTEMUI_PACKAGE) {
+            addCandidate(activeRoot, isActive = true, windowType = null, windowLayer = ACTIVE_ROOT_NO_LAYER)
+        } else {
+            safeRecycleNode(activeRoot)
+        }
+        for (window in runCatching { service.windows }.getOrDefault(emptyList())) {
+            val windowType = runCatching { window.type }.getOrNull()
+            val windowLayer = runCatching { window.layer }.getOrNull() ?: ACTIVE_ROOT_NO_LAYER
+            val wr = runCatching { window.root }.getOrNull() ?: continue
+            if (wr.packageName?.toString() == SYSTEMUI_PACKAGE) {
+                addCandidate(wr, isActive = false, windowType = windowType, windowLayer = windowLayer)
+            } else {
+                safeRecycleNode(wr)
+            }
+        }
+        val winner = selectKeyguardCandidate(candidateMeta)
+        if (winner != null) {
+            root = candidateNodes[winner]
+            rootSource = if (candidateMeta[winner].isActive) "activeWindow" else "windowList"
+            for (i in candidateNodes.indices) {
+                if (i != winner) safeRecycleNode(candidateNodes[i])
+            }
         }
 
         val liveRoot = root
@@ -914,7 +987,9 @@ internal fun McpHandler.unlockDiagnose(id: String): String {
         )
         return toolSuccessResponse(id, JSONObject(payload).toString())
     } finally {
-        if (root !== activeRoot) safeRecycleNode(activeRoot)
+        // root is the single surviving candidate (owned here); losers and any
+        // non-systemui active root were already freed inline. Exactly one
+        // recycle per obtained instance.
         safeRecycleNode(root)
     }
 }

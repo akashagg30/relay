@@ -177,4 +177,79 @@ class UnlockDiagnoseTest {
         assertEquals("none", payload["rootSource"])
         assertEquals(false, payload["rootPresent"])
     }
+
+    @Test
+    fun `status bar listed first loses to full-screen keyguard listed second`() {
+        // MIUI-shaped order: a 1080x90 status strip enumerated before the
+        // full-screen keyguard. Area -- not enumeration order -- must win, or
+        // Gate B reads a false 0 while the keypad is fully node-visible.
+        val candidates = listOf(
+            KeyguardWindowCandidate(
+                isActive = false,
+                keyguardTypeMatch = false,
+                areaPx = 1080 * 90,
+                layer = 5
+            ),
+            KeyguardWindowCandidate(
+                isActive = false,
+                keyguardTypeMatch = false,
+                areaPx = 1080 * 2400,
+                layer = 2
+            )
+        )
+        assertEquals(1, selectKeyguardCandidate(candidates))
+    }
+
+    @Test
+    fun `single systemui candidate is chosen`() {
+        val candidates = listOf(
+            KeyguardWindowCandidate(
+                isActive = false,
+                keyguardTypeMatch = false,
+                areaPx = 1080 * 2400,
+                layer = 0
+            )
+        )
+        assertEquals(0, selectKeyguardCandidate(candidates))
+    }
+
+    @Test
+    fun `empty candidate list selects none`() {
+        assertNull(selectKeyguardCandidate(emptyList()))
+    }
+
+    @Test
+    fun `resolvable keyguard type match beats larger area`() {
+        // If a future build exposes the hidden keyguard type, the type match
+        // outranks even a larger window (rule (a) before rule (b)).
+        val candidates = listOf(
+            KeyguardWindowCandidate(
+                isActive = false,
+                keyguardTypeMatch = false,
+                areaPx = 1080 * 2400,
+                layer = 9
+            ),
+            KeyguardWindowCandidate(
+                isActive = false,
+                keyguardTypeMatch = true,
+                areaPx = 1080 * 90,
+                layer = 1
+            )
+        )
+        assertEquals(1, selectKeyguardCandidate(candidates))
+    }
+
+    @Test
+    fun `equal areas break ties by layer then active root`() {
+        val byLayer = listOf(
+            KeyguardWindowCandidate(false, false, 1080 * 2400, 2),
+            KeyguardWindowCandidate(false, false, 1080 * 2400, 7)
+        )
+        assertEquals(1, selectKeyguardCandidate(byLayer))
+        val byActive = listOf(
+            KeyguardWindowCandidate(false, false, 1080 * 2400, 3),
+            KeyguardWindowCandidate(true, false, 1080 * 2400, 3)
+        )
+        assertEquals(1, selectKeyguardCandidate(byActive))
+    }
 }

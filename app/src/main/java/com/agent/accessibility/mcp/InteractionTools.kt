@@ -116,7 +116,10 @@ private fun McpHandler.attemptClick(
                 val screenW = getScreenWidth()
                 val screenH = getScreenHeight()
                 if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-                    val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
+                    // R-1/D1: tap the MATCHED node's own rect (clamped to the
+                    // ancestor rect), never the ancestor (container) centre.
+                    val tapRect = NodeResolver.resolveTapRect(traversal.targetBounds, bounds)
+                    val tapResult = run { val (gx, gy) = gesturePointFromBounds(tapRect); dispatchTap(gx, gy) }
                     if (tapResult) {
                         Log.d(TAG, "Coordinate fallback succeeded")
                         // Post-click verification
@@ -169,7 +172,10 @@ private fun McpHandler.attemptClick(
 
             val bounds = reTraversal.bounds
             if (NodeResolver.isSaneBounds(bounds)) {
-                val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
+                // R-1/D1: tap the MATCHED node's own rect (clamped to the
+                // ancestor rect), never the ancestor (container) centre.
+                val tapRect = NodeResolver.resolveTapRect(reTraversal.targetBounds, bounds)
+                val tapResult = run { val (gx, gy) = gesturePointFromBounds(tapRect); dispatchTap(gx, gy) }
                 if (tapResult) {
                     return toolSuccessResponse(id, JSONObject().apply {
                         put("success", true)
@@ -267,13 +273,15 @@ internal fun McpHandler.performClick(
         }
     }
 
-    // 3. Coordinate fallback — ONLY with sane, visible bounds from current target
+    // 3. Coordinate fallback — ONLY with sane, visible bounds from current target.
+    // R-1/D2: bounds here are already the target's own rect; convert with NO
+    // status-bar subtraction (gesture coords are screen-absolute).
     val bounds = getNodeBounds(target)
     if (bounds != null && NodeResolver.isSaneBounds(bounds)) {
         val screenW = getScreenWidth()
         val screenH = getScreenHeight()
         if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-            val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
+            val tapResult = run { val (gx, gy) = gesturePointFromBounds(bounds); dispatchTap(gx, gy) }
             if (tapResult) {
                 Log.d(TAG, "Coordinate fallback succeeded ($method)")
                 return toolSuccessResponse(id, JSONObject().apply {
@@ -524,14 +532,6 @@ internal fun McpHandler.getScreenHeight(): Int {
 }
 
 /**
- * Get status bar height in pixels.
- */
-private fun McpHandler.getStatusBarHeight(): Int {
-    val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-    return if (resourceId > 0) context.resources.getDimensionPixelSize(resourceId) else 0
-}
-
-/**
  * Get navigation bar height in pixels.
  */
 private fun McpHandler.getNavigationBarHeight(): Int {
@@ -540,13 +540,24 @@ private fun McpHandler.getNavigationBarHeight(): Int {
 }
 
 /**
- * Convert accessibility bounds center to gesture coordinates.
- * Accessibility bounds include status bar offset, gesture coordinates don't.
+ * Convert a bounds rect to screen-absolute gesture coordinates.
+ *
+ * R-1/D2: NO status-bar subtraction. getBoundsInScreen() is screen-absolute
+ * and dispatchGesture() takes screen-absolute coords — proven by swipe
+ * parity on-device (same point, one minute apart, same screenHash
+ * 96a3fc93c8c30b99): click_node{id 565:32} via coordinate_fallback missed
+ * (screenHash unchanged) while swipe{540,1331 -> 544,1335} launched the
+ * experience (screenHash c59636ea73b44ae7, "Loading..."). The old
+ * centerY-minus-status-bar term shifted every fallback tap up by the
+ * status-bar height and is deleted, not kept.
+ *
+ * Pure (no McpHandler receiver) so it is unit-testable on the JVM. Uses
+ * field access only: android.graphics.Rect methods are stubs under unit
+ * tests; for screen coords (left+right) shr 1 == centerX().
  */
-private fun McpHandler.boundsToGestureCoords(bounds: Rect): Pair<Int, Int> {
-    val statusBarHeight = getStatusBarHeight()
-    val x = bounds.centerX()
-    val y = bounds.centerY() - statusBarHeight
+internal fun gesturePointFromBounds(rect: Rect): Pair<Int, Int> {
+    val x = (rect.left + rect.right) shr 1
+    val y = (rect.top + rect.bottom) shr 1
     return Pair(x, y.coerceAtLeast(0))
 }
 

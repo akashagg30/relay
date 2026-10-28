@@ -6,18 +6,23 @@
 
 package com.agent.accessibility.mcp
 
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.KeyguardManager
 import android.content.Context
+import android.graphics.Rect
+import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.agent.accessibility.service.AgentAccessibilityService
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
  * Observation tools: reading and projecting the current UI state.
- * Implements get_screen_state, observe, find, scroll_until and diag_sealed.
+ * Implements get_screen_state, observe, find, scroll_until, diag_sealed and unlock_diagnose.
  */
 
 internal fun McpHandler.getScreenState(id: String): String {
@@ -609,4 +614,307 @@ internal fun McpHandler.diagSealed(id: String, args: JSONObject): String {
     }
 
     return toolSuccessResponse(id, log.joinToString("\n"))
+}
+
+// ---------------------------------------------------------------------------
+// unlock_diagnose: READ-ONLY lock-screen diagnostic (relay UNLOCK 2/6).
+//
+// READ-ONLY CONTRACT: this tool only reads KeyguardManager state, the window
+// list, and a single node tree. It never taps, never types, never wakes the
+// device, never writes prefs. Every obtained node is freed via safeRecycleNode.
+// ---------------------------------------------------------------------------
+
+private const val SYSTEMUI_PACKAGE = "com.android.systemui"
+
+/**
+ * Digit-matching rules (pure, JVM-testable, no Android types):
+ * - text or contentDescription that, after trim(), is a single ASCII digit
+ *   '0'..'9' -> that digit (AOSP case: keypad buttons expose contentDescription
+ *   "1".."9" while text may be empty).
+ * - contentDescription of the form "<digit>, <words>" (TalkBack style, e.g.
+ *   "1, one") -> the leading digit.
+ * - viewIdResourceName whose last segment (after '/') ends in key/digit + 0-9
+ *   (e.g. "...:id/key7", "...:id/digit_9") -> that digit.
+ * - everything else -> null.
+ *
+ * Priority per node: text single-digit, then contentDescription single-digit,
+ * then TalkBack form, then view id. One node yields at most one digit.
+ */
+internal fun digitFromNodeFields(
+    text: String?,
+    contentDescription: String?,
+    viewIdResourceName: String?
+): Char? {
+    val t = text?.trim()
+    if (t != null && t.length == 1 && t[0] in '0'..'9') return t[0]
+    val cd = contentDescription?.trim()
+    if (cd != null && cd.isNotEmpty()) {
+        if (cd.length == 1 && cd[0] in '0'..'9') return cd[0]
+        if (cd.length >= 2 && cd[0] in '0'..'9' && cd[1] == ',') return cd[0]
+    }
+    if (!viewIdResourceName.isNullOrEmpty()) {
+        val seg = viewIdResourceName.substringAfterLast('/')
+        val m = Regex("(?:key|digit)_?([0-9])$", RegexOption.IGNORE_CASE).find(seg)
+        if (m != null) return m.groupValues[1][0]
+    }
+    return null
+}
+
+/** One node's three text channels, in the same order digitFromNodeFields takes them. */
+internal data class NodeDigitFields(
+    val text: String?,
+    val contentDescription: String?,
+    val viewIdResourceName: String?
+)
+
+/** Result of counting digit nodes: nodes observed (one count per node, never
+ * synthesised) plus the sorted distinct digits seen, comma-joined. */
+internal data class DigitNodeCount(val count: Int, val digitsSeen: String)
+
+/**
+ * Counts digit NODES in [nodes]: at most one count per node no matter how many
+ * of its channels carry the digit. Returns the node count plus the sorted
+ * distinct digits seen ("" when none). A 0 is an honest 0.
+ */
+internal fun countDigitNodes(nodes: List<NodeDigitFields>): DigitNodeCount {
+    var count = 0
+    val seen = sortedSetOf<Char>()
+    for (n in nodes) {
+        val d = digitFromNodeFields(n.text, n.contentDescription, n.viewIdResourceName)
+        if (d != null) {
+            count++
+            seen.add(d)
+        }
+    }
+    return DigitNodeCount(count, seen.joinToString(","))
+}
+
+/**
+ * Exact key set emitted by unlock_diagnose. The first seven are the brief keys
+ * Gate B quotes; the rest carry device identity so a zero result is
+ * self-contained in one quote. Asserted exactly by UnlockDiagnoseTest.
+ */
+internal val UNLOCK_DIAGNOSE_KEYS: Set<String> = setOf(
+    "isDeviceLocked",
+    "isSecure",
+    "canPerformGestures",
+    "rootPresent",
+    "rootPackage",
+    "digitNodesFound",
+    "rootBounds",
+    "deviceModel",
+    "deviceManufacturer",
+    "androidRelease",
+    "sdkInt",
+    "displayWidthPixels",
+    "displayHeightPixels",
+    "rootSource",
+    "digitsSeen"
+)
+
+internal val UNLOCK_DIAGNOSE_ROOT_BOUNDS_KEYS: Set<String> =
+    setOf("left", "top", "right", "bottom")
+
+/**
+ * Pure-JVM payload builder (no Android types): org.json is Android-only so unit
+ * tests cannot construct a JSONObject; unlockDiagnose wraps this map in one on
+ * device. Keys are exactly UNLOCK_DIAGNOSE_KEYS.
+ */
+internal fun buildUnlockDiagnoseMap(
+    isDeviceLocked: Boolean,
+    isSecure: Boolean,
+    canPerformGestures: Boolean,
+    rootPresent: Boolean,
+    rootPackage: String,
+    digitNodesFound: Int,
+    rootLeft: Int,
+    rootTop: Int,
+    rootRight: Int,
+    rootBottom: Int,
+    deviceModel: String,
+    deviceManufacturer: String,
+    androidRelease: String,
+    sdkInt: Int,
+    displayWidthPixels: Int,
+    displayHeightPixels: Int,
+    rootSource: String,
+    digitsSeen: String
+): Map<String, Any?> {
+    return linkedMapOf(
+        "isDeviceLocked" to isDeviceLocked,
+        "isSecure" to isSecure,
+        "canPerformGestures" to canPerformGestures,
+        "rootPresent" to rootPresent,
+        "rootPackage" to rootPackage,
+        "digitNodesFound" to digitNodesFound,
+        "rootBounds" to linkedMapOf(
+            "left" to rootLeft,
+            "top" to rootTop,
+            "right" to rootRight,
+            "bottom" to rootBottom
+        ),
+        "deviceModel" to deviceModel,
+        "deviceManufacturer" to deviceManufacturer,
+        "androidRelease" to androidRelease,
+        "sdkInt" to sdkInt,
+        "displayWidthPixels" to displayWidthPixels,
+        "displayHeightPixels" to displayHeightPixels,
+        "rootSource" to rootSource,
+        "digitsSeen" to digitsSeen
+    )
+}
+
+/** Frees an obtained node. recycle() is deprecated from API 33, so the call
+ * lives in exactly one suppressed helper instead of at every site. */
+@Suppress("DEPRECATION")
+private fun safeRecycleNode(node: AccessibilityNodeInfo?) {
+    if (node == null) return
+    runCatching { node.recycle() }
+}
+
+/**
+ * AccessibilityService exposes no canPerformGestures property (verified on API
+ * 35), so capability is read the same way AgentAccessibilityService logs it at
+ * connect time: serviceInfo capabilities & CAPABILITY_CAN_PERFORM_GESTURES.
+ */
+private fun McpHandler.serviceCanPerformGestures(service: AgentAccessibilityService): Boolean {
+    return try {
+        val caps = service.serviceInfo?.capabilities ?: 0
+        caps and AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES != 0
+    } catch (e: Exception) {
+        false
+    }
+}
+
+// AccessibilityWindowInfo exposes no TYPE_KEYGUARD constant (verified on API
+// 35: only APPLICATION, INPUT_METHOD, SYSTEM, ACCESSIBILITY_OVERLAY,
+// MAGNIFICATION_OVERLAY, SPLIT_SCREEN_DIVIDER exist), so resolve it
+// reflectively for builds that expose one; null means "no preference".
+private val keyguardWindowType: Int? by lazy {
+    runCatching {
+        AccessibilityWindowInfo::class.java.getField("TYPE_KEYGUARD").getInt(null)
+    }.getOrNull()
+}
+
+private fun isKeyguardWindowType(windowType: Int): Boolean {
+    val kg = keyguardWindowType ?: return false
+    return windowType == kg
+}
+
+private fun walkDigitNodes(node: AccessibilityNodeInfo, onDigit: (Char) -> Unit) {
+    val d = runCatching {
+        digitFromNodeFields(
+            node.text?.toString(),
+            node.contentDescription?.toString(),
+            node.viewIdResourceName
+        )
+    }.getOrNull()
+    if (d != null) onDigit(d)
+    val kids = runCatching { node.childCount }.getOrDefault(0)
+    for (i in 0 until kids) {
+        val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
+        try {
+            walkDigitNodes(child, onDigit)
+        } finally {
+            safeRecycleNode(child)
+        }
+    }
+}
+
+/**
+ * unlock_diagnose: read-only lock-screen diagnostic. Takes no arguments; call
+ * it while the device is LOCKED. Returns the 7 brief keys (isDeviceLocked,
+ * isSecure, canPerformGestures, rootPresent, rootPackage, digitNodesFound,
+ * rootBounds) plus device identity and root provenance. digitNodesFound counts
+ * NODES ACTUALLY OBSERVED -- never synthesised, never assumed; a 0 is a 0.
+ */
+internal fun McpHandler.unlockDiagnose(id: String): String {
+    val service = AgentAccessibilityService.instance
+        ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
+
+    val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+    val locked = runCatching { km?.isDeviceLocked == true }.getOrDefault(false)
+    // KeyguardManager exposes no isSecure(); isKeyguardSecure() (verified on API
+    // 35 alongside isDeviceSecure/isDeviceLocked/isKeyguardLocked) is the
+    // lock-screen equivalent: true when unlocking requires PIN/pattern/password.
+    val secure = runCatching { km?.isKeyguardSecure == true }.getOrDefault(false)
+    val gestures = serviceCanPerformGestures(service)
+
+    var root: AccessibilityNodeInfo? = null
+    var rootSource = "none"
+    val activeRoot = runCatching { findForegroundRoot(service) }.getOrNull()
+    try {
+        if (activeRoot != null && activeRoot.packageName?.toString() == SYSTEMUI_PACKAGE) {
+            root = activeRoot
+            rootSource = "activeWindow"
+        } else {
+            var picked: AccessibilityNodeInfo? = null
+            var pickedKeyguard = false
+            for (window in runCatching { service.windows }.getOrDefault(emptyList())) {
+                val wr = runCatching { window.root }.getOrNull() ?: continue
+                if (wr.packageName?.toString() == SYSTEMUI_PACKAGE) {
+                    val isKg = isKeyguardWindowType(window.type)
+                    if (picked == null || (isKg && !pickedKeyguard)) {
+                        safeRecycleNode(picked)
+                        picked = wr
+                        pickedKeyguard = isKg
+                    } else {
+                        safeRecycleNode(wr)
+                    }
+                } else {
+                    safeRecycleNode(wr)
+                }
+            }
+            root = picked
+            if (picked != null) rootSource = "windowList"
+        }
+
+        val liveRoot = root
+        val rootPkg = if (liveRoot != null) {
+            runCatching { liveRoot.packageName?.toString() }.getOrNull() ?: ""
+        } else {
+            ""
+        }
+        val bounds = Rect()
+        if (liveRoot != null) runCatching { liveRoot.getBoundsInScreen(bounds) }
+
+        var digitNodesFound = 0
+        val seen = sortedSetOf<Char>()
+        if (liveRoot != null) {
+            walkDigitNodes(liveRoot) { d ->
+                digitNodesFound++
+                seen.add(d)
+            }
+        }
+
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(metrics)
+
+        val payload = buildUnlockDiagnoseMap(
+            isDeviceLocked = locked,
+            isSecure = secure,
+            canPerformGestures = gestures,
+            rootPresent = liveRoot != null,
+            rootPackage = rootPkg,
+            digitNodesFound = digitNodesFound,
+            rootLeft = bounds.left,
+            rootTop = bounds.top,
+            rootRight = bounds.right,
+            rootBottom = bounds.bottom,
+            deviceModel = Build.MODEL,
+            deviceManufacturer = Build.MANUFACTURER,
+            androidRelease = Build.VERSION.RELEASE,
+            sdkInt = Build.VERSION.SDK_INT,
+            displayWidthPixels = metrics.widthPixels,
+            displayHeightPixels = metrics.heightPixels,
+            rootSource = rootSource,
+            digitsSeen = seen.joinToString(",")
+        )
+        return toolSuccessResponse(id, JSONObject(payload).toString())
+    } finally {
+        if (root !== activeRoot) safeRecycleNode(activeRoot)
+        safeRecycleNode(root)
+    }
 }

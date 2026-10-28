@@ -121,6 +121,12 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
             put("elementId", stringParam("Element id from get_screen_state (e.g. \\\"24:86\\\")"))
         }))
 
+    tools.put(toolDef("unlock_diagnose",
+        "READ-ONLY diagnostic for the lock screen. Returns isDeviceLocked/isSecure/ " +
+        "canPerformGestures/rootPresent/rootPackage/digitNodesFound/rootBounds + device identity. " +
+        "Takes NO arguments. Call it while the device is LOCKED.",
+        JSONObject()))
+
     tools.put(toolDef("get_audit_log",
         "Get recent MCP tool call audit log. Shows success/failure, method used, timing. " +
         "Use for debugging tool reliability issues.",

@@ -27,7 +27,7 @@ internal const val CLICK_DEADLINE_MS = 4000L
  * Tool implementations live in focused files alongside this one, as
  * extension functions on this class:
  * - `ToolRegistry.kt`      tool definitions / schemas served by tools/list
- * - `ObservationTools.kt`  get_screen_state, observe, find, scroll_until, diag_sealed
+ * - `ObservationTools.kt`  get_screen_state, observe, find, scroll_until, diag_sealed, unlock_diagnose
  * - `InteractionTools.kt`  click_node, tap, swipe, input_text, back, home + gesture helpers
  * - `AppTools.kt`          launch_app, list_apps, search_apps, open_app, current_app, wait
  */
@@ -135,6 +135,7 @@ class McpHandler(internal val context: Context) {
             "find" -> find(id, args)
             "scroll_until" -> scrollUntil(id, args)
             "diag_sealed" -> diagSealed(id, args)
+            "unlock_diagnose" -> unlockDiagnose(id)
             "get_audit_log" -> getAuditLog(id, args)
             "get_audit_summary" -> getAuditSummary(id)
             "set_log_sync" -> setLogSync(id, args)

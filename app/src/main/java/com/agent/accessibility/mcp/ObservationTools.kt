@@ -68,7 +68,7 @@ internal fun McpHandler.getScreenState(id: String): String {
 
         // Store descriptors in snapshot manager
         val descriptors = NodeResolver.buildDescriptors(tree)
-        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
+        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage, getScreenWidth(), getScreenHeight())
 
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
@@ -276,7 +276,7 @@ internal fun McpHandler.observe(id: String): String {
         val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
 
         val descriptors = NodeResolver.buildDescriptors(tree)
-        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
+        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage, getScreenWidth(), getScreenHeight())
 
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
@@ -357,7 +357,7 @@ internal fun McpHandler.observeInternal(service: AgentAccessibilityService): Sem
         ?: return SemanticScene(null, null, false, emptyList())
     val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
     val descriptors = NodeResolver.buildDescriptors(tree)
-    val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
+    val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage, getScreenWidth(), getScreenHeight())
     val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val metrics = DisplayMetrics()
     @Suppress("DEPRECATION")
@@ -490,7 +490,7 @@ internal fun McpHandler.diagSealed(id: String, args: JSONObject): String {
     log.add("Tree1: ${tree1.totalNodeCount} nodes, pkg=${tree1.foregroundPackage}")
 
     val descriptors = NodeResolver.buildDescriptors(tree1)
-    val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree1.foregroundPackage)
+    val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree1.foregroundPackage, getScreenWidth(), getScreenHeight())
     log.add("Stored descriptors: snapshotId=$snapshotId, count=${descriptors.size}")
 
     // Recycle root1

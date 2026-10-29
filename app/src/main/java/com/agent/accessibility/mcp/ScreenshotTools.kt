@@ -344,7 +344,12 @@ private fun drawOverlayFromTree(screenshot: Bitmap, service: AgentAccessibilityS
     try {
         val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
         val descriptors = NodeResolver.buildDescriptors(tree)
-        val snapshotId = NodeResolver.snapshotManager.store(descriptors, tree.foregroundPackage)
+        // R-2: the screenshot bitmap is captured in the same instant as the
+        // tree read, so its dimensions are the snapshot's screen dimensions
+        // for the snapshot-rect recovery proof.
+        val snapshotId = NodeResolver.snapshotManager.store(
+            descriptors, tree.foregroundPackage, screenshot.width, screenshot.height
+        )
 
         fun drawNode(node: com.agent.accessibility.model.AccessibilityNodeData, depth: Int) {
             val bounds = Rect(

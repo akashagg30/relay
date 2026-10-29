@@ -68,7 +68,12 @@ private fun McpHandler.attemptClick(
     val t1 = System.currentTimeMillis()
     Log.d(TAG, "[click_node] resolve: ${t1 - t0}ms")
 
-    val traversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
+    // R-2: live screen size, needed both by resolveFresh (degenerate-root
+    // guard prefers the smallest same-score rect) and by the fallback
+    // planner (snapshot-rect recovery proves the screen is unchanged).
+    val screenW = getScreenWidth()
+    val screenH = getScreenHeight()
+    val traversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId, screenW, screenH)
         ?: return toolErrorResponse(id, "element_not_found: element ${elementId.encode()} could not be resolved " +
             "against the current screen. Call get_screen_state to refresh.")
 
@@ -122,15 +127,25 @@ private fun McpHandler.attemptClick(
             // planFallbackTap, which REFUSES a degenerate (screen-sized) rect
             // instead of tapping its centre, and anchors the tap inside the
             // element's own rect from the snapshot the id came from.
-            val screenW = getScreenWidth()
-            val screenH = getScreenHeight()
+            // R-2: when the fresh traversal resolved the window root, the
+            // planner may still recover the tap from the snapshot's
+            // descriptor rect — but only when the snapshot proves the screen
+            // (dimensions + foreground package) is unchanged since the id
+            // was minted. pkgBefore above is the live package observation.
+            val snapshotSize = NodeResolver.snapshotManager.getSnapshotScreenSize(elementId.snapshotId)
             val plan = planFallbackTap(
                 liveBounds = traversal.targetBounds,
                 ancestorBounds = traversal.bounds,
                 anchorBounds = descriptorBoundsRect(descriptor),
                 screenWidth = screenW,
                 screenHeight = screenH,
-                hasClickableAncestor = traversal.clickableAncestor != null
+                hasClickableAncestor = traversal.clickableAncestor != null,
+                snapshotContext = SnapshotTapContext(
+                    snapshotScreenWidth = snapshotSize?.first ?: -1,
+                    snapshotScreenHeight = snapshotSize?.second ?: -1,
+                    snapshotPackage = NodeResolver.snapshotManager.getSnapshotPackage(elementId.snapshotId),
+                    currentPackage = pkgBefore
+                )
             )
             if (plan is TapPlan.Refused) {
                 return refuseFallback(
@@ -171,7 +186,7 @@ private fun McpHandler.attemptClick(
             return toolErrorResponse(id, "target_offscreen_unreachable: action_deadline_exceeded after scroll")
         }
 
-        val reTraversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
+        val reTraversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId, screenW, screenH)
             ?: return toolErrorResponse(id, "target_offscreen_unreachable: could not re-resolve after scroll")
 
         try {
@@ -244,7 +259,7 @@ private fun McpHandler.retryClickWithFreshSnapshot(
     val rootNode = findForegroundRoot(service) ?: return null
     val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(rootNode)
     val newDescriptors = NodeResolver.buildDescriptors(tree)
-    val newSnapshotId = NodeResolver.snapshotManager.store(newDescriptors, tree.foregroundPackage)
+    val newSnapshotId = NodeResolver.snapshotManager.store(newDescriptors, tree.foregroundPackage, getScreenWidth(), getScreenHeight())
 
     var bestNewNodeId = -1
     var bestScore = 0
@@ -698,7 +713,7 @@ private fun McpHandler.bringIntoViewFresh(
 
         Thread.sleep(SCROLL_DELAY_MS)
 
-        val reTraversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
+        val reTraversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId, screenW, screenH)
         if (reTraversal != null) {
             try {
                 if (reTraversal.isVisible) {
@@ -748,7 +763,9 @@ internal fun McpHandler.bringIntoView(
 
             val service = AgentAccessibilityService.instance
             if (service != null) {
-                val reTraversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
+                val reTraversal = NodeResolver.resolveFresh(
+                    service, elementId.snapshotId, elementId.nodeId, getScreenWidth(), getScreenHeight()
+                )
                 if (reTraversal != null) {
                     try {
                         if (reTraversal.isVisible) {
@@ -821,7 +838,7 @@ internal fun McpHandler.bringIntoView(
 
         val service = AgentAccessibilityService.instance
         if (service != null) {
-            val reTraversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
+            val reTraversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId, screenW, screenH)
             if (reTraversal != null) {
                 try {
                     if (reTraversal.isVisible) {
@@ -996,7 +1013,9 @@ internal fun McpHandler.inputText(id: String, args: JSONObject): String {
     val service = AgentAccessibilityService.instance
         ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
 
-    val traversal = NodeResolver.resolveFresh(service, elementId.snapshotId, elementId.nodeId)
+    val traversal = NodeResolver.resolveFresh(
+        service, elementId.snapshotId, elementId.nodeId, getScreenWidth(), getScreenHeight()
+    )
         ?: return toolErrorResponse(id, "element_not_found: element $elementId could not be resolved")
 
     return try {

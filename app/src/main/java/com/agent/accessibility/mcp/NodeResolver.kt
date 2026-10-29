@@ -147,6 +147,70 @@ data class ClickResult(
     val scrollAttempts: Int = 0
 )
 
+/**
+ * R-2: one same-top-score candidate for the fresh-traversal tie-break. Bounds
+ * are plain fields (android.graphics.Rect methods are stubs under JVM unit
+ * tests), captured with getBoundsInScreen at selection time.
+ */
+internal data class FreshMatchCandidate(
+    val nodeIndex: Int,
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int
+)
+
+internal fun freshCandidateArea(c: FreshMatchCandidate): Long {
+    return (c.right - c.left).toLong() * (c.bottom - c.top).toLong()
+}
+
+internal fun freshCandidateSane(c: FreshMatchCandidate): Boolean {
+    return c.right > c.left && c.bottom > c.top
+}
+
+/**
+ * R-2: the fresh traversal must not settle on a node whose rect covers the
+ * whole screen when a smaller node carries the same semantic tokens.
+ *
+ * [candidates] holds every node tied at the top score, in traversal order —
+ * position 0 is the legacy winner (first match wins ties). When the legacy
+ * winner is NOT degenerate, it is kept untouched: this only changes the
+ * degenerate-winner case. Otherwise the smallest sane same-score rect wins,
+ * with traversal order as the tie-break for equal areas.
+ *
+ * Returns the winning POSITION in [candidates] (-1 when empty; the caller
+ * keeps the legacy index then). Unknown screen dimensions (<= 0) also keep
+ * the legacy winner.
+ */
+internal fun preferSmallestFreshMatch(
+    candidates: List<FreshMatchCandidate>,
+    screenWidth: Int,
+    screenHeight: Int
+): Int {
+    if (candidates.isEmpty()) return -1
+    if (screenWidth <= 0 || screenHeight <= 0) return 0
+    val winner = candidates[0]
+    val probe = Rect()
+    probe.left = winner.left
+    probe.top = winner.top
+    probe.right = winner.right
+    probe.bottom = winner.bottom
+    if (!isDegenerateFallbackRect(probe, screenWidth, screenHeight)) return 0
+    val winnerArea = freshCandidateArea(winner)
+    var best = -1
+    var bestArea = winnerArea
+    for (i in candidates.indices) {
+        val c = candidates[i]
+        if (!freshCandidateSane(c)) continue
+        val area = freshCandidateArea(c)
+        if (area < winnerArea && (best < 0 || area < bestArea)) {
+            best = i
+            bestArea = area
+        }
+    }
+    return if (best >= 0) best else 0
+}
+
 class SnapshotManager {
     companion object {
         private const val MAX_SNAPSHOTS = 50
@@ -156,6 +220,14 @@ class SnapshotManager {
         val snapshotId: Long,
         val descriptors: Map<Int, NodeDescriptor>,
         val foregroundPackage: String?,
+        /**
+         * R-2: screen dimensions when the snapshot was minted. The coordinate
+         * fallback may only recover a tap from the snapshot's descriptor rect
+         * when these still match the live screen (rotation/resize refuses).
+         * -1 means "recorded before this field existed": unprovable, refuse.
+         */
+        val screenWidth: Int = -1,
+        val screenHeight: Int = -1,
         val createdAt: Long = System.currentTimeMillis()
     )
 
@@ -163,9 +235,14 @@ class SnapshotManager {
     private var nextSnapshotId = 1L
 
     @Synchronized
-    fun store(descriptors: Map<Int, NodeDescriptor>, foregroundPackage: String?): Long {
+    fun store(
+        descriptors: Map<Int, NodeDescriptor>,
+        foregroundPackage: String?,
+        screenWidth: Int = -1,
+        screenHeight: Int = -1
+    ): Long {
         val id = nextSnapshotId++
-        entries.addLast(SnapshotEntry(id, descriptors, foregroundPackage))
+        entries.addLast(SnapshotEntry(id, descriptors, foregroundPackage, screenWidth, screenHeight))
         while (entries.size > MAX_SNAPSHOTS) {
             entries.removeFirst()
         }
@@ -180,6 +257,18 @@ class SnapshotManager {
     @Synchronized
     fun getSnapshotPackage(snapshotId: Long): String? {
         return entries.find { it.snapshotId == snapshotId }?.foregroundPackage
+    }
+
+    /**
+     * R-2: dimensions of the screen the snapshot was minted on, or null when
+     * the snapshot is unknown. (-1, -1) means "recorded before dimensions
+     * were stored": the caller must treat the screen as unprovable and
+     * refuse the snapshot-rect recovery.
+     */
+    @Synchronized
+    fun getSnapshotScreenSize(snapshotId: Long): Pair<Int, Int>? {
+        val entry = entries.find { it.snapshotId == snapshotId } ?: return null
+        return Pair(entry.screenWidth, entry.screenHeight)
     }
 
     @Synchronized
@@ -302,12 +391,15 @@ object NodeResolver {
     fun resolveFresh(
         service: AgentAccessibilityService,
         snapshotId: Long,
-        nodeId: Int
+        nodeId: Int,
+        screenWidth: Int = 0,
+        screenHeight: Int = 0
     ): FreshTraversalResult? {
         val root = service.rootInActiveWindow ?: return null
         val descriptor = snapshotManager.getDescriptor(snapshotId, nodeId) ?: return null
 
         val liveNodes = mutableListOf<AccessibilityNodeInfo>()
+        val liveScores = mutableListOf<Int>()
         var bestNodeIndex = -1
         var bestScore = 0
 
@@ -318,6 +410,7 @@ object NodeResolver {
                 bestNodeIndex = liveNodes.size
             }
             liveNodes.add(node)
+            liveScores.add(score)
 
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
@@ -343,7 +436,27 @@ object NodeResolver {
             return null
         }
 
-        val matchedNode = liveNodes[bestNodeIndex]
+        // R-2: when the top-score winner is a degenerate (screen-sized) node
+        // but a smaller node carries the same tokens, prefer the smallest
+        // same-score rect. Unknown screen size keeps the legacy winner.
+        var selectedNodeIndex = bestNodeIndex
+        val tied = ArrayList<FreshMatchCandidate>()
+        for (i in liveNodes.indices) {
+            if (liveScores[i] != bestScore) continue
+            val b = Rect()
+            try {
+                liveNodes[i].getBoundsInScreen(b)
+            } catch (_: Exception) {
+                // Leave b insane: it can never win the smallest-rect pick.
+            }
+            tied.add(FreshMatchCandidate(i, b.left, b.top, b.right, b.bottom))
+        }
+        if (tied.isNotEmpty()) {
+            val pos = preferSmallestFreshMatch(tied, screenWidth, screenHeight)
+            if (pos >= 0) selectedNodeIndex = tied[pos].nodeIndex
+        }
+
+        val matchedNode = liveNodes[selectedNodeIndex]
 
         val logical = getLogicalActionableTarget(matchedNode, descriptor)
         val isVisible = isLogicalTargetVisible(matchedNode, logical.clickableAncestor)
@@ -358,7 +471,7 @@ object NodeResolver {
 
         val ancestorToKeep = logical.clickableAncestor
         for (i in liveNodes.indices) {
-            if (i != bestNodeIndex && liveNodes[i] !== ancestorToKeep) {
+            if (i != selectedNodeIndex && liveNodes[i] !== ancestorToKeep) {
                 try { liveNodes[i].recycle() } catch (_: Exception) {}
             }
         }

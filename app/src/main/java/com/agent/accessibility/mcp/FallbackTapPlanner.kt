@@ -52,6 +52,12 @@ internal const val FALLBACK_REASON_TAP_UNVERIFIED = "tap_unverified"
 /** Where the tapped rect came from, for the audit trail. */
 internal const val BOUNDS_SOURCE_MATCHED_NODE = "matched_node"
 internal const val BOUNDS_SOURCE_CLICKABLE_ANCESTOR = "clickable_ancestor"
+/**
+ * R-2: the fresh traversal resolved a degenerate (screen-sized) rect, so the
+ * tap fell back to the descriptor rect from the snapshot the id came from —
+ * only when the screen was provably unchanged (see [SnapshotTapContext]).
+ */
+internal const val BOUNDS_SOURCE_SNAPSHOT_RECT = "snapshot_rect"
 
 /** A degenerate rect must cover at least this percentage of BOTH screen axes. */
 internal const val DEGENERATE_BOUNDS_PERCENT = 95
@@ -139,6 +145,64 @@ internal fun fallbackIntersect(a: Rect, b: Rect): Rect? {
 }
 
 /**
+ * R-2: what the coordinate fallback must prove before it may tap the
+ * snapshot's descriptor rect after the fresh traversal resolved a
+ * degenerate (screen-sized) rect.
+ *
+ * The tap is only safe when the screen is provably the same one the id was
+ * minted on: identical dimensions (rules out rotation/resize) AND the same
+ * foreground package (rules out an app change underneath the id). Either
+ * fact missing or changed means REFUSE — a screen-sized resolved rect plus
+ * a stale descriptor rect is exactly the wrong-target tap 1.0.114 stopped.
+ */
+internal data class SnapshotTapContext(
+    val snapshotScreenWidth: Int,
+    val snapshotScreenHeight: Int,
+    val snapshotPackage: String?,
+    val currentPackage: String?
+)
+
+/**
+ * R-2 recovery: the live rect is degenerate, but the descriptor rect from
+ * the snapshot the id came from may still be a safe tap — iff the context
+ * proves the screen is unchanged. Returns the tap, or null when recovery is
+ * not provably safe (caller refuses with degenerate_bounds).
+ *
+ * The tap point is the centre of the descriptor rect clamped to the screen;
+ * the clamped rect is inside the descriptor rect, so the tap stays credited
+ * against the target the caller asked for.
+ */
+internal fun planSnapshotRectTap(
+    anchorBounds: Rect?,
+    screenWidth: Int,
+    screenHeight: Int,
+    snapshotContext: SnapshotTapContext?
+): TapPlan.Tap? {
+    val ctx = snapshotContext ?: return null
+    if (ctx.snapshotScreenWidth <= 0 || ctx.snapshotScreenHeight <= 0) return null
+    if (ctx.snapshotScreenWidth != screenWidth || ctx.snapshotScreenHeight != screenHeight) return null
+    if (ctx.snapshotPackage == null || ctx.snapshotPackage != ctx.currentPackage) return null
+    if (!fallbackRectSane(anchorBounds)) return null
+    if (isDegenerateFallbackRect(anchorBounds, screenWidth, screenHeight)) return null
+    val screen = Rect()
+    screen.left = 0
+    screen.top = 0
+    screen.right = screenWidth
+    screen.bottom = screenHeight
+    val clamped = fallbackIntersect(anchorBounds!!, screen) ?: return null
+    val point = gesturePointFromBounds(clamped)
+    val inside = fallbackPointInRect(point.first, point.second, anchorBounds)
+    return TapPlan.Tap(
+        x = point.first,
+        y = point.second,
+        tapRect = clamped,
+        targetBounds = anchorBounds,
+        boundsSource = BOUNDS_SOURCE_SNAPSHOT_RECT,
+        insideTarget = inside
+    )
+}
+
+/**
  * Decide where (or whether) the coordinate fallback may tap.
  *
  * @param liveBounds     the FRESH traversal's matched-node rect (the target's own rect now).
@@ -155,6 +219,8 @@ internal fun fallbackIntersect(a: Rect, b: Rect): Rect? {
  *
  * Refusals (no gesture at all):
  *  - live rect insane or degenerate (screen-sized) — the traversal resolved the root, not the target;
+ *    a degenerate live rect still recovers via [planSnapshotRectTap] when the snapshot proves the
+ *    screen is unchanged, and refuses otherwise;
  *  - the anchor rect is degenerate — the id points at a container, so any point is a guess.
  *
  * Otherwise the tap point is the centre of `live ∩ anchor` when those agree (a legitimately moved
@@ -175,7 +241,15 @@ internal fun planFallbackTap(
      * `boundsSource: clickable_ancestor` and hid the matched-node case that the
      * device audit needs to see.
      */
-    hasClickableAncestor: Boolean = false
+    hasClickableAncestor: Boolean = false,
+    /**
+     * R-2 recovery context: when the live rect is degenerate, the planner may
+     * still tap the snapshot's descriptor rect iff this proves the screen is
+     * unchanged (same dimensions, same foreground package). Null (the
+     * default, e.g. the post-scroll path whose anchor is a fresh rect, not a
+     * snapshot rect) keeps the 1.0.114 behaviour: refuse.
+     */
+    snapshotContext: SnapshotTapContext? = null
 ): TapPlan {
     val liveStr = fallbackRectToString(liveBounds)
     val targetStr = fallbackRectToString(anchorBounds)
@@ -185,6 +259,9 @@ internal fun planFallbackTap(
         return TapPlan.Refused(FALLBACK_REASON_DEGENERATE_BOUNDS, liveStr, targetStr)
     }
     if (isDegenerateFallbackRect(liveBounds, screenWidth, screenHeight)) {
+        // R-2: the traversal resolved the root — recover the tap from the
+        // snapshot rect when provably safe, refuse (zero gestures) otherwise.
+        planSnapshotRectTap(anchorBounds, screenWidth, screenHeight, snapshotContext)?.let { return it }
         return TapPlan.Refused(FALLBACK_REASON_DEGENERATE_BOUNDS, liveStr, targetStr)
     }
     if (isDegenerateFallbackRect(anchorBounds, screenWidth, screenHeight)) {

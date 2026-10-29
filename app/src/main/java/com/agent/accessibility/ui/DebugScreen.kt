@@ -60,6 +60,7 @@ fun DebugScreen(controller: AccessibilityController) {
     var tunnelRunning by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.isRunning == true) }
     var tunnelUrl by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.publicUrl) }
     var tunnelError by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.lastError) }
+    var tunnelDiagnostic by remember { mutableStateOf(McpServerService.instance?.cloudflareTunnel?.diagnostic) }
     var overlayRunning by remember { mutableStateOf(OverlayButtonService.isRunning) }
     var isMiui by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -80,6 +81,7 @@ fun DebugScreen(controller: AccessibilityController) {
             tunnelRunning = McpServerService.instance?.cloudflareTunnel?.isRunning == true
             tunnelUrl = McpServerService.instance?.cloudflareTunnel?.publicUrl
             tunnelError = McpServerService.instance?.cloudflareTunnel?.lastError
+            tunnelDiagnostic = McpServerService.instance?.cloudflareTunnel?.diagnostic
             overlayRunning = OverlayButtonService.isRunning
             delay(1000)
         }
@@ -163,7 +165,7 @@ fun DebugScreen(controller: AccessibilityController) {
                 CloudflareTunnelCard(
                     isTunnelRunning = tunnelRunning,
                     publicUrl = tunnelUrl,
-                    tunnelError = tunnelError,
+                    tunnelError = tunnelError ?: tunnelDiagnostic,
                     isMcpRunning = isMcpRunning,
                     onStartTunnel = {
                         val intent = Intent(context, McpServerService::class.java).apply {
@@ -545,11 +547,18 @@ fun CloudflareTunnelCard(
 
             if (tunnelError != null) {
                 Text(
+                    text = tunnelError.lineSequence().first(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF44336),
+                    maxLines = 2
+                )
+                Text(
                     text = tunnelError,
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFF44336),
                     fontFamily = FontFamily.Monospace,
-                    maxLines = 3
+                    maxLines = 8
                 )
             }
 

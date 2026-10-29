@@ -84,6 +84,35 @@ class LocalLogStore(private val context: Context) {
     }
 
     /**
+     * Log one tunnel line (cloudflared stdout/stderr pump output or the exit
+     * diagnostic). Saved immediately — the app may die right after the tunnel
+     * does, so this must not wait for the every-20-entries timer.
+     */
+    fun logTunnel(line: String) {
+        val entry = LogEntry(
+            timestamp = System.currentTimeMillis(),
+            tool = "tunnel",
+            success = true,
+            context = mapOf("line" to line)
+        )
+        entries.addFirst(entry)
+
+        // Rotate if too many entries today
+        if (entries.size > MAX_ENTRIES_PER_DAY) {
+            rotateTodayLogs()
+        }
+
+        flush()
+    }
+
+    /**
+     * Persist today's logs to disk right now.
+     */
+    internal fun flush() {
+        saveTodayLogs()
+    }
+
+    /**
      * Get recent log entries as JSON.
      */
     fun getRecentJson(limit: Int = 50): String {

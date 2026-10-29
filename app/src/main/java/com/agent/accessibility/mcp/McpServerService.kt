@@ -74,7 +74,10 @@ class McpServerService : Service() {
         auditLogger = AuditLogger(this)
         consentPrefs = getSharedPreferences("mcp_consent", Context.MODE_PRIVATE)
         authToken = authManager.token
-        cloudflareTunnel = CloudflareTunnel(this)
+        cloudflareTunnel = CloudflareTunnel(
+            this,
+            sink = { line -> mcpHandler.localLogStore.logTunnel(line) }
+        )
         cloudflareTunnel?.listener = object : CloudflareTunnel.Listener {
             override fun onUrlAvailable(url: String) = startForegroundWithNotification()
             override fun onStopped() = startForegroundWithNotification()

@@ -7,6 +7,7 @@
 package com.agent.accessibility.mcp
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -26,7 +27,7 @@ import java.util.concurrent.TimeUnit
  */
 class TunnelProcessTest {
 
-    private class FakeProcess(
+    private open class FakeProcess(
         private val stdout: InputStream,
         private val stderr: InputStream,
         private val exitLatch: CountDownLatch = CountDownLatch(1)
@@ -254,6 +255,264 @@ class TunnelProcessTest {
             assertEquals("/fake/home", h.envs.single()["HOME"])
         } finally {
             h.tunnel.stop()
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Tunnel diagnostics: rolling buffer, exitInfo/diagnostic, generation
+    // guard (CARD 1 of 2 — surface WHY cloudflared dies).
+    // ------------------------------------------------------------------
+
+    /**
+     * A [FakeProcess] whose [waitFor] swallows interrupts, simulating a
+     * watcher thread that outlives stop() and fires late with a stale
+     * generation.
+     */
+    private class UninterruptibleFake(
+        stdout: InputStream,
+        stderr: InputStream
+    ) : FakeProcess(stdout, stderr) {
+        override fun waitFor(): Int {
+            while (true) {
+                try {
+                    return super.waitFor()
+                } catch (_: InterruptedException) {
+                    // Keep waiting: the stale watcher outlives stop().
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `self-exit folds diagnostic with code duration and last stderr`() {
+        val exitLatch = CountDownLatch(1)
+        val h = Harness(onExit = { exitLatch.countDown() })
+        try {
+            h.start()
+            assertTrue(awaitCondition(5_000) { h.tunnel.isRunning })
+            val marker = "tunnel-boom-stderr-marker"
+            h.stderrWrite.write("INF $marker\n".toByteArray())
+            h.stderrWrite.flush()
+            assertTrue(
+                "stderr line buffered",
+                awaitCondition(5_000) { h.tunnel.bufferedLines.any { it.contains(marker) } }
+            )
+            h.fake.exit(1)
+            assertTrue("onExit fired", exitLatch.await(10, TimeUnit.SECONDS))
+            assertTrue(
+                "diagnostic set",
+                awaitCondition(5_000) { h.tunnel.diagnostic != null }
+            )
+            val d = h.tunnel.diagnostic!!
+            assertTrue(
+                "exact prefix",
+                d.startsWith("cloudflared (libcloudflared.so) exited with code 1 after ")
+            )
+            assertTrue(
+                "duration one-decimal",
+                Regex("after \\d+\\.\\ds").containsMatchIn(d)
+            )
+            assertTrue("last stderr line", d.contains("last stderr: INF $marker"))
+            val info = h.tunnel.exitInfo
+            assertNotNull(info)
+            assertEquals(1, info!!.exitCode)
+            assertEquals("INF $marker", info.lastStderr)
+            assertTrue(info.durationMs >= 0)
+        } finally {
+            h.tunnel.stop()
+        }
+    }
+
+    @Test
+    fun `self-exit with no stderr falls back to last stdout`() {
+        val exitLatch = CountDownLatch(1)
+        val h = Harness(onExit = { exitLatch.countDown() })
+        try {
+            h.start()
+            assertTrue(awaitCondition(5_000) { h.tunnel.isRunning })
+            val marker = "only-stdout-marker"
+            h.stdoutWrite.write("INF $marker\n".toByteArray())
+            h.stdoutWrite.flush()
+            assertTrue(
+                "stdout line buffered",
+                awaitCondition(5_000) { h.tunnel.bufferedLines.any { it.contains(marker) } }
+            )
+            h.fake.exit(2)
+            assertTrue("onExit fired", exitLatch.await(10, TimeUnit.SECONDS))
+            assertTrue(
+                "diagnostic set",
+                awaitCondition(5_000) { h.tunnel.diagnostic != null }
+            )
+            val d = h.tunnel.diagnostic!!
+            assertTrue(
+                "exact prefix",
+                d.startsWith("cloudflared (libcloudflared.so) exited with code 2 after ")
+            )
+            assertTrue(
+                "stdout fallback",
+                d.contains("no stderr output (last stdout: INF $marker)")
+            )
+            val info = h.tunnel.exitInfo
+            assertNotNull(info)
+            assertNull(info!!.lastStderr)
+            assertEquals("INF $marker", info.lastStdout)
+        } finally {
+            h.tunnel.stop()
+        }
+    }
+
+    @Test
+    fun `self-exit with no output reports no output captured`() {
+        val exitLatch = CountDownLatch(1)
+        val h = Harness(onExit = { exitLatch.countDown() })
+        try {
+            h.start()
+            assertTrue(awaitCondition(5_000) { h.tunnel.isRunning })
+            h.fake.exit(3)
+            assertTrue("onExit fired", exitLatch.await(10, TimeUnit.SECONDS))
+            assertTrue(
+                "diagnostic set",
+                awaitCondition(5_000) { h.tunnel.diagnostic != null }
+            )
+            val d = h.tunnel.diagnostic!!
+            assertTrue(
+                "exact prefix",
+                d.startsWith("cloudflared (libcloudflared.so) exited with code 3 after ")
+            )
+            assertTrue("no-output branch", d.contains("no output captured"))
+        } finally {
+            h.tunnel.stop()
+        }
+    }
+
+    @Test
+    fun `launch failure sets diagnostic with launch prefix and null exitInfo`() {
+        val tunnel = TunnelProcess(
+            launcher = { _, _ -> throw RuntimeException("boom-launch-diag") },
+            log = {}
+        )
+        tunnel.start("/fake/nativeLibraryDir/libcloudflared.so", 8765, File("/fake/home"))
+        val d = tunnel.diagnostic
+        assertNotNull(d)
+        assertTrue("launch prefix", d!!.startsWith("cloudflared launch failed:"))
+        assertTrue("mentions launch", "launch" in d)
+        assertTrue("keeps lastError text", "boom-launch-diag" in d)
+        assertNull(tunnel.exitInfo)
+        assertTrue(!tunnel.isRunning)
+    }
+
+    @Test
+    fun `buffer caps at 25 lines per stream oldest dropped first`() {
+        val h = Harness()
+        try {
+            h.start()
+            assertTrue(awaitCondition(5_000) { h.tunnel.isRunning })
+            for (i in 1..40) {
+                h.stdoutWrite.write("stdout line $i\n".toByteArray())
+                h.stderrWrite.write("stderr line $i\n".toByteArray())
+            }
+            h.stdoutWrite.flush()
+            h.stderrWrite.flush()
+            assertTrue(
+                "buffer full",
+                awaitCondition(10_000) { h.tunnel.bufferedLines.size == 50 }
+            )
+            val lines = h.tunnel.bufferedLines
+            assertEquals(50, lines.size)
+            assertEquals(25, lines.count { "[stdout]" in it })
+            assertEquals(25, lines.count { "[stderr]" in it })
+            assertTrue(lines.none { it.endsWith("stdout line 1") })
+            assertTrue(lines.none { it.endsWith("stderr line 1") })
+            assertTrue(lines.any { it.endsWith("stdout line 16") })
+            assertTrue(lines.any { it.endsWith("stderr line 16") })
+            assertTrue(lines.any { it.endsWith("stdout line 40") })
+            assertTrue(lines.any { it.endsWith("stderr line 40") })
+            assertTrue(
+                "arrival order kept",
+                lines.indexOfFirst { it.endsWith("stdout line 16") } <
+                    lines.indexOfFirst { it.endsWith("stdout line 40") }
+            )
+        } finally {
+            h.tunnel.stop()
+        }
+    }
+
+    @Test
+    fun `buffer lines carry stream tag and HH-mm-ss-SSS timestamp`() {
+        val h = Harness()
+        try {
+            h.start()
+            assertTrue(awaitCondition(5_000) { h.tunnel.isRunning })
+            h.stdoutWrite.write("ts-tag-stdout\n".toByteArray())
+            h.stderrWrite.write("ts-tag-stderr\n".toByteArray())
+            h.stdoutWrite.flush()
+            h.stderrWrite.flush()
+            assertTrue(
+                "both lines buffered",
+                awaitCondition(5_000) { h.tunnel.bufferedLines.size == 2 }
+            )
+            val lines = h.tunnel.bufferedLines
+            val stamped = Regex("^\\d{2}:\\d{2}:\\d{2}\\.\\d{3} \\[(stdout|stderr)] ")
+            assertTrue("every line stamped", lines.all { stamped.containsMatchIn(it) })
+            assertTrue(lines.any { "[stdout] ts-tag-stdout" in it })
+            assertTrue(lines.any { "[stderr] ts-tag-stderr" in it })
+        } finally {
+            h.tunnel.stop()
+        }
+    }
+
+    @Test
+    fun `stale watcher after stop-start cannot overwrite new run`() {
+        val stdout1r = PipedInputStream(65536)
+        val stdout1w = PipedOutputStream(stdout1r)
+        val stderr1r = PipedInputStream(65536)
+        val stderr1w = PipedOutputStream(stderr1r)
+        val stdout2r = PipedInputStream(65536)
+        val stdout2w = PipedOutputStream(stdout2r)
+        val stderr2r = PipedInputStream(65536)
+        val stderr2w = PipedOutputStream(stderr2r)
+        val fake1 = UninterruptibleFake(stdout1r, stderr1r)
+        val fake2 = FakeProcess(stdout2r, stderr2r)
+        val fakes = listOf(fake1, fake2)
+        var calls = 0
+        val tunnel = TunnelProcess(
+            launcher = { _, _ -> fakes[calls++] },
+            log = {}
+        )
+        try {
+            tunnel.start("/fake/nativeLibraryDir/libcloudflared.so", 8765, File("/fake/home"))
+            assertTrue(awaitCondition(5_000) { tunnel.isRunning })
+            // User stops; the gen-1 watcher survives (swallowed interrupt).
+            tunnel.stop()
+            assertTrue(!tunnel.isRunning)
+            // New run on a fresh process.
+            tunnel.start("/fake/nativeLibraryDir/libcloudflared.so", 8765, File("/fake/home"))
+            assertTrue(awaitCondition(5_000) { tunnel.isRunning })
+            assertEquals(2, calls)
+            // The OLD process exits late with a stale generation.
+            fake1.exit(1)
+            Thread.sleep(1000)
+            assertTrue("new run still running", tunnel.isRunning)
+            assertNull("stale watcher wrote no exitInfo", tunnel.exitInfo)
+            assertNull("stale watcher wrote no diagnostic", tunnel.diagnostic)
+        } finally {
+            try {
+                stdout1w.close()
+            } catch (_: Exception) {
+            }
+            try {
+                stderr1w.close()
+            } catch (_: Exception) {
+            }
+            try {
+                stdout2w.close()
+            } catch (_: Exception) {
+            }
+            try {
+                stderr2w.close()
+            } catch (_: Exception) {
+            }
+            tunnel.stop()
         }
     }
 }

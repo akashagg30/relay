@@ -35,7 +35,8 @@ class CloudflareTunnel(
         log: (String) -> Unit
     ) -> TunnelProcess = { onUrl, onExit, onError, log ->
         TunnelProcess(onUrl = onUrl, onExit = onExit, onError = onError, log = log)
-    }
+    },
+    private val sink: (String) -> Unit = {}
 ) {
 
     companion object {
@@ -58,7 +59,7 @@ class CloudflareTunnel(
             lastError = err
             mainHandler.post { listener?.onError(err) }
         },
-        { msg -> Log.d(TAG, msg) }
+        { msg -> Log.d(TAG, msg); sink(msg) }
     )
 
     var listener: Listener? = null
@@ -73,6 +74,10 @@ class CloudflareTunnel(
 
     val publicUrl: String?
         get() = tunnel.publicUrl
+
+    /** WHY the tunnel died (launch failure or self-exit); null when healthy. */
+    val diagnostic: String?
+        get() = tunnel.diagnostic
 
     /**
      * Starts the tunnel forwarding to the given local [port].
@@ -94,6 +99,7 @@ class CloudflareTunnel(
         }
 
         Log.d(TAG, "Starting cloudflared in place: ${exe.absolutePath} (port=$port)")
+        sink("Starting cloudflared in place: ${exe.absolutePath} (port=$port)")
         tunnel.start(exe.absolutePath, port, context.cacheDir)
     }
 
@@ -104,6 +110,7 @@ class CloudflareTunnel(
         if (!tunnel.isRunning) return
         tunnel.stop()
         Log.d(TAG, "Tunnel stopped")
+        sink("Tunnel stopped")
         listener?.onStopped()
     }
 
@@ -113,5 +120,6 @@ class CloudflareTunnel(
     fun destroy() {
         tunnel.stop()
         Log.d(TAG, "Tunnel destroyed")
+        sink("Tunnel destroyed")
     }
 }

@@ -285,15 +285,14 @@ class R1TargetAnchorTest {
             ancestorBounds = navSearchRect(),
             anchorBounds = navSearchRect(),
             screenWidth = screenW,
-            screenHeight = screenH
+            screenHeight = screenH,
+            hasClickableAncestor = true
         )
         assertTrue(plan is TapPlan.Tap)
         plan as TapPlan.Tap
         assertEquals(540, plan.x)
         assertEquals(2268, plan.y)
         assertTrue("the tap point must be inside the requested rect", plan.insideTarget)
-        // resolveFresh always supplies bounds (ancestor-or-matched rect), so the
-        // production source label for a row with a clickable ancestor is this one.
         assertEquals(BOUNDS_SOURCE_CLICKABLE_ANCESTOR, plan.boundsSource)
 
         assertEquals(
@@ -377,6 +376,33 @@ class R1TargetAnchorTest {
         assertEquals(468, plan.x)
         assertEquals(193, plan.y)
         assertTrue("a shifted-but-overlapping element still taps inside", plan.insideTarget)
+    }
+
+    @Test
+    fun `boundsSource reports the matched node when there is no clickable ancestor`() {
+        // On-device evidence shape: the fallback report said
+        // boundsSource=matched_node. FreshTraversalResult.bounds is ALWAYS
+        // non-null, so inferring the source from it would report
+        // clickable_ancestor for every tap and hide this case from the audit.
+        val noAncestor = planFallbackTap(
+            liveBounds = navSearchRect(),
+            ancestorBounds = navSearchRect(), // resolveFresh's clamp rect, still non-null
+            anchorBounds = navSearchRect(),
+            screenWidth = screenW,
+            screenHeight = screenH,
+            hasClickableAncestor = false
+        ) as TapPlan.Tap
+        assertEquals(BOUNDS_SOURCE_MATCHED_NODE, noAncestor.boundsSource)
+
+        val withAncestor = planFallbackTap(
+            liveBounds = navSearchRect(),
+            ancestorBounds = navSearchRect(),
+            anchorBounds = navSearchRect(),
+            screenWidth = screenW,
+            screenHeight = screenH,
+            hasClickableAncestor = true
+        ) as TapPlan.Tap
+        assertEquals(BOUNDS_SOURCE_CLICKABLE_ANCESTOR, withAncestor.boundsSource)
     }
 
     @Test

@@ -129,7 +129,8 @@ private fun McpHandler.attemptClick(
                 ancestorBounds = traversal.bounds,
                 anchorBounds = descriptorBoundsRect(descriptor),
                 screenWidth = screenW,
-                screenHeight = screenH
+                screenHeight = screenH,
+                hasClickableAncestor = traversal.clickableAncestor != null
             )
             if (plan is TapPlan.Refused) {
                 return refuseFallback(
@@ -195,7 +196,8 @@ private fun McpHandler.attemptClick(
                 ancestorBounds = reTraversal.bounds,
                 anchorBounds = reTraversal.targetBounds,
                 screenWidth = screenW,
-                screenHeight = screenH
+                screenHeight = screenH,
+                hasClickableAncestor = reTraversal.clickableAncestor != null
             )
             if (scrollPlan is TapPlan.Refused) {
                 return refuseFallback(

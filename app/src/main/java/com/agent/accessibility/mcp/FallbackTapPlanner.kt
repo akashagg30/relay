@@ -167,7 +167,15 @@ internal fun planFallbackTap(
     ancestorBounds: Rect?,
     anchorBounds: Rect?,
     screenWidth: Int,
-    screenHeight: Int
+    screenHeight: Int,
+    /**
+     * Whether the fresh traversal found a CLICKABLE ANCESTOR. Passed in rather
+     * than inferred from `ancestorBounds != null`: `FreshTraversalResult.bounds`
+     * is always non-null, so inferring made every fallback report
+     * `boundsSource: clickable_ancestor` and hid the matched-node case that the
+     * device audit needs to see.
+     */
+    hasClickableAncestor: Boolean = false
 ): TapPlan {
     val liveStr = fallbackRectToString(liveBounds)
     val targetStr = fallbackRectToString(anchorBounds)
@@ -193,7 +201,7 @@ internal fun planFallbackTap(
 
     val point = gesturePointFromBounds(tapRect)
     val inside = fallbackPointInRect(point.first, point.second, anchor)
-    val source = if (ancestorBounds != null) BOUNDS_SOURCE_CLICKABLE_ANCESTOR else BOUNDS_SOURCE_MATCHED_NODE
+    val source = if (hasClickableAncestor) BOUNDS_SOURCE_CLICKABLE_ANCESTOR else BOUNDS_SOURCE_MATCHED_NODE
 
     return TapPlan.Tap(
         x = point.first,

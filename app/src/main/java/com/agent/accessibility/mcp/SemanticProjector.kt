@@ -246,12 +246,6 @@ object SemanticProjector {
             null  // offscreen elements may have degenerate bounds
         }
 
-        // (2) Actionable but nameless: keep it (it is reachable by id and
-        //     rect) and tell the caller it has no name.
-        if (!hasIdentity && actionable) {
-            ctx.gap(node, TreeGap.ACTIONABLE_WITHOUT_IDENTITY, null)
-        }
-
         val role = determineRole(node)
         val childElements = projectChildren(node, ctx)
 
@@ -275,6 +269,17 @@ object SemanticProjector {
             isControlRole(role)
         ) {
             element = element.copy(title = childElements.first().title ?: childElements.first().value)
+        }
+
+        // (2) Actionable but nameless *after* derivation: keep it (it is
+        //     reachable by id and rect) and tell the caller it has no name. A
+        //     clickable row whose text lives in a child is NOT a gap — the row
+        //     carries the derived title.
+        if (actionable && !hasIdentity &&
+            element.title.isNullOrBlank() && element.summary.isNullOrBlank() &&
+            element.value.isNullOrBlank()
+        ) {
+            ctx.gap(node, TreeGap.ACTIONABLE_WITHOUT_IDENTITY, null)
         }
 
         return listOf(element.copy(viewId = node.viewIdResourceName))

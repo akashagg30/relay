@@ -37,6 +37,92 @@ object SemanticProjector {
         )
     }
 
+    /**
+     * Lenient projection for the observe() sparse fallback (R-13).
+     *
+     * The strict [project] filters aggressively (bounds sanity, decorative
+     * images, content-less containers) and can legitimately return zero
+     * elements for dialogs/popups whose nodes carry little text. This walk
+     * keeps every node that carries any signal — text, description, or
+     * interactivity — so dialogs/popups stay visible to clients, and
+     * guarantees a non-empty scene whenever the tree has a root.
+     */
+    fun projectSparse(
+        tree: AccessibilityTreeData,
+        snapshotId: Long,
+        screenHeight: Int,
+        screenWidth: Int = 1080
+    ): SemanticScene {
+        val root = tree.root
+        val elements = mutableListOf<SemanticElement>()
+        if (root != null) {
+            collectSparse(root, snapshotId, screenHeight, screenWidth, elements)
+            if (elements.isEmpty()) {
+                elements.add(
+                    SemanticElement(
+                        elementId = ElementId(snapshotId, root.nodeId).encode(),
+                        role = SemanticRole.VALUE,
+                        title = root.text ?: root.contentDescription
+                            ?: root.className?.substringAfterLast('.')
+                    )
+                )
+            }
+        }
+        return SemanticScene(
+            app = tree.foregroundPackage,
+            screenTitle = if (root != null) extractScreenTitle(root) else "Unknown",
+            scrollable = root != null && hasScrollableDescendant(root),
+            elements = elements
+        )
+    }
+
+    private fun collectSparse(
+        node: AccessibilityNodeData,
+        snapshotId: Long,
+        screenHeight: Int,
+        screenWidth: Int,
+        out: MutableList<SemanticElement>
+    ) {
+        val hasSignal = !node.text.isNullOrBlank() ||
+            !node.contentDescription.isNullOrBlank() ||
+            node.clickable || node.editable || node.scrollable ||
+            node.checked || node.selected
+        if (hasSignal) {
+            val role = when {
+                node.editable -> SemanticRole.INPUT
+                node.checked -> SemanticRole.TOGGLE
+                node.clickable -> SemanticRole.ACTION
+                node.scrollable -> SemanticRole.LIST
+                !node.text.isNullOrBlank() -> SemanticRole.VALUE
+                else -> SemanticRole.LABEL
+            }
+            val bounds = if (hasSaneBounds(node)) {
+                BoundsHint.fromBounds(
+                    node.boundsInScreen.left, node.boundsInScreen.top,
+                    node.boundsInScreen.right, node.boundsInScreen.bottom,
+                    screenHeight, screenWidth
+                )
+            } else {
+                null
+            }
+            out.add(
+                SemanticElement(
+                    elementId = ElementId(snapshotId, node.nodeId).encode(),
+                    role = role,
+                    title = node.text ?: node.contentDescription,
+                    enabled = node.enabled,
+                    checked = if (role == SemanticRole.TOGGLE) node.checked else null,
+                    selected = if (node.selected) true else null,
+                    scrollable = role == SemanticRole.LIST,
+                    bounds = bounds
+                )
+            )
+        }
+        for (child in node.children) {
+            collectSparse(child, snapshotId, screenHeight, screenWidth, out)
+        }
+    }
+
     private fun extractScreenTitle(root: AccessibilityNodeData): String {
         val candidate = findTitleCandidate(root, maxDepth = 10)
         return candidate ?: "Unknown"

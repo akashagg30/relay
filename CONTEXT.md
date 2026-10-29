@@ -72,10 +72,10 @@ Phase 3 — Security hardening complete. MCP server with authentication, rate li
 |------|-------|-------------|
 | `get_screen_state` | — | Current foreground accessibility tree as JSON |
 | `observe` | — | Semantic scene (roles, sections, elements) — use instead of get_screen_state |
-| `click_node` | `elementId` | Click element, fresh traversal + clickable ancestor walk |
+| `click_node` | `id` | Click element, fresh traversal + clickable ancestor walk (`elementId`/`nodeId` accepted as legacy aliases) |
 | `tap` | `x`, `y` | Gesture tap at coordinates |
 | `swipe` | `startX`, `startY`, `endX`, `endY`, `durationMs` | Gesture swipe |
-| `input_text` | `elementId`, `text` | ACTION_SET_TEXT on editable element |
+| `input_text` | `id`, `text` | ACTION_SET_TEXT on editable element (`elementId`/`nodeId` accepted as legacy aliases for the id) |
 | `back` | — | GLOBAL_ACTION_BACK |
 | `home` | — | GLOBAL_ACTION_HOME |
 | `launch_app` | `packageName` | Launch app via package manager |
@@ -132,7 +132,7 @@ in the new screen's visible text — no model call).
 **Architecture**: Fresh traversal per action. No `AccessibilityNodeInfo` survives beyond the traversal that acquired it.
 
 1. `get_screen_state` captures tree, stores **descriptors** (viewId, text, class, bounds) — NOT live nodes
-2. `click_node(elementId)` calls `resolveFresh()`:
+2. `click_node(id)` calls `resolveFresh()`:
    - Acquires fresh `rootInActiveWindow`
    - Traverses tree, collects ALL nodes in a list (no recycling during traversal)
    - Finds best match by descriptor scoring

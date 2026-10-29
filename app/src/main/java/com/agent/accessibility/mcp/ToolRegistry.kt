@@ -20,6 +20,9 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "Returns a semantic representation of the current screen. " +
         "Elements have roles (action, input, toggle, value, section, header, list, tab). " +
         "Each element has an id for click_node and input_text. " +
+        "Top-level keys are always: app, screenTitle, scrollable, screenHash, elements, screenState. " +
+        "screenTitle is \"Unknown\" when no title candidate (TextView/Toolbar/ActionBar) " +
+        "was found within depth 10 of the window root; normal for full-screen apps/games. " +
         "IMPORTANT: Element IDs change between calls. Use them immediately after observe(). " +
         "Don't cache IDs across multiple observe() calls.",
         JSONObject()))

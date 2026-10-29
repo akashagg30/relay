@@ -29,34 +29,108 @@ import java.util.concurrent.TimeUnit
 internal fun McpHandler.takeScreenshot(id: String): String {
     val service = AgentAccessibilityService.instance
         ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
+    return takeScreenshot(id, defaultScreenshotBackend(service))
+}
 
+/**
+ * Bounded retry delay between the two take_screenshot attempts (R-4).
+ * Thread.sleep is acceptable here: the tool already blocks the MCP thread.
+ */
+internal const val SCREENSHOT_RETRY_DELAY_MS = 400L
+
+/** Methods tried by the default capture chain, in order. */
+internal val SCREENSHOT_METHODS = listOf("accessibility_api", "shell_screencap")
+
+/**
+ * Capture attempt behind a seam (R-4). The default implementation is
+ * today's chain — AccessibilityService.takeScreenshot() then `screencap`
+ * — so a fake can drive the retry logic in JVM unit tests.
+ */
+internal interface ScreenshotBackend {
+    fun capture(): ScreenshotResult?
+    val lastMethod: String?
+}
+
+/**
+ * Generic bounded retry: one immediate attempt, one bounded-delay retry,
+ * then give up. Returns the first non-null result (or null) plus the
+ * total number of attempts made (always <= maxAttempts).
+ */
+internal fun <T> captureWithRetry(
+    capture: () -> T?,
+    maxAttempts: Int = 2,
+    delayMs: Long = SCREENSHOT_RETRY_DELAY_MS,
+    sleep: (Long) -> Unit = { Thread.sleep(it) },
+    onAttempt: (attempt: Int, succeeded: Boolean) -> Unit = { _, _ -> }
+): Pair<T?, Int> {
+    var attempts = 0
+    while (true) {
+        attempts++
+        val result = capture()
+        onAttempt(attempts, result != null)
+        if (result != null || attempts >= maxAttempts) return result to attempts
+        sleep(delayMs)
+    }
+}
+
+/**
+ * Typed failure envelope for take_screenshot (R-4). Built by hand with
+ * fixed key order (R-1 precedent) so it is identical on every build.
+ * Never prose: clients parse the tool-error `text` payload as JSON.
+ */
+internal fun screenshotFailedEnvelope(attempts: Int, methods: List<String>, elapsedMs: Long): String {
+    val methodsJson = methods.joinToString(",", "[", "]") { "\"$it\"" }
+    return "{\"error\":{\"code\":\"screenshot_failed\",\"attempts\":$attempts," +
+        "\"methods\":$methodsJson,\"elapsedMs\":$elapsedMs,\"retryable\":true}}"
+}
+
+internal fun McpHandler.defaultScreenshotBackend(service: AgentAccessibilityService): ScreenshotBackend {
+    var method: String? = null
+    return object : ScreenshotBackend {
+        override val lastMethod: String? get() = method
+        override fun capture(): ScreenshotResult? {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                takeScreenshotViaAccessibility(service)?.let {
+                    method = "accessibility_api"
+                    return it
+                }
+                Log.w(TAG, "AccessibilityService.takeScreenshot() failed, falling back to screencap")
+            }
+            takeScreenshotViaShell()?.let {
+                method = "shell_screencap"
+                return it
+            }
+            return null
+        }
+    }
+}
+
+internal fun McpHandler.takeScreenshot(id: String, backend: ScreenshotBackend): String {
     val startTime = System.currentTimeMillis()
 
-    // Try AccessibilityService.takeScreenshot() first (API 30+, requires flagRequestScreenshot)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val result = takeScreenshotViaAccessibility(service)
-        if (result != null) {
-            val duration = System.currentTimeMillis() - startTime
-            auditLogger.log("take_screenshot", true, "accessibility_api", duration, null)
-            Log.d(TAG, "Screenshot via AccessibilityService.takeScreenshot(): ${result.width}x${result.height} in ${duration}ms")
-            return toolSuccessResponse(id, result.json.toString())
+    val (result, attempts) = captureWithRetry(
+        capture = { backend.capture() },
+        onAttempt = { attempt, succeeded ->
+            if (!succeeded) {
+                auditLogger.log(
+                    "take_screenshot", false, "attempt_${attempt}_failed",
+                    System.currentTimeMillis() - startTime, "attempt $attempt failed"
+                )
+            }
         }
-        Log.w(TAG, "AccessibilityService.takeScreenshot() failed, falling back to screencap")
-    }
+    )
 
-    // Fallback: use screencap shell command
-    val result = takeScreenshotViaShell()
     if (result != null) {
         val duration = System.currentTimeMillis() - startTime
-        auditLogger.log("take_screenshot", true, "shell_screencap", duration, null)
-        Log.d(TAG, "Screenshot via screencap: ${result.width}x${result.height} in ${duration}ms")
+        val method = backend.lastMethod ?: "screenshot"
+        auditLogger.log("take_screenshot", true, method, duration, null)
+        Log.d(TAG, "Screenshot via $method: ${result.width}x${result.height} in ${duration}ms")
         return toolSuccessResponse(id, result.json.toString())
     }
 
     val duration = System.currentTimeMillis() - startTime
-    auditLogger.log("take_screenshot", false, "all_methods_failed", duration, "All screenshot methods failed")
-    return toolErrorResponse(id, "Screenshot failed: all methods returned null. " +
-        "Ensure accessibility service is enabled and screencap is available.")
+    auditLogger.log("take_screenshot", false, "all_methods_failed", duration, "Screenshot failed after $attempts attempts")
+    return toolErrorResponse(id, screenshotFailedEnvelope(attempts, SCREENSHOT_METHODS, duration))
 }
 
 internal fun McpHandler.screenshotWithOverlay(id: String): String {
@@ -107,7 +181,7 @@ internal fun McpHandler.screenshotWithOverlay(id: String): String {
 
 // ── Screenshot capture methods ──────────────────────────────────────────────
 
-private data class ScreenshotResult(
+internal data class ScreenshotResult(
     val bitmap: Bitmap,
     val width: Int,
     val height: Int

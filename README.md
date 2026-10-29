@@ -130,10 +130,10 @@ Response:
 | Tool | Input | Description |
 |------|-------|-------------|
 | `get_screen_state` | — | Returns current foreground app accessibility tree as JSON |
-| `click_node` | `nodeId` | Clicks a node (walks up to clickable ancestor if needed) |
+| `click_node` | `id` | Clicks a node (walks up to clickable ancestor if needed). Legacy aliases `elementId`/`nodeId` also accepted |
 | `tap` | `x`, `y` | Taps at screen coordinates |
 | `swipe` | `startX`, `startY`, `endX`, `endY`, `durationMs` | Swipes between two points |
-| `input_text` | `nodeId`, `text` | Types text into an editable node |
+| `input_text` | `id`, `text` | Types text into an editable node. Legacy aliases `elementId`/`nodeId` also accepted for the id |
 | `back` | — | Performs GLOBAL_ACTION_BACK |
 | `home` | — | Performs GLOBAL_ACTION_HOME |
 | `launch_app` | `packageName` | Launches an app by package name |
@@ -142,7 +142,7 @@ Response:
 | `search_apps` | `query` | Searches installed applications by name |
 | `open_app` | `name` | Opens an installed application by human-readable name (returns `ambiguous_app` instead of guessing) |
 | `current_app` | — | Returns the currently foreground application |
-| `observe` | — | Returns a semantic representation of the current screen (roles, ids) for cleaner reasoning |
+| `observe` | — | Returns a semantic representation of the current screen (roles, ids) for cleaner reasoning. Top-level keys are always `app`, `screenTitle`, `scrollable`, `screenHash`, `elements`, `screenState`. `screenTitle` is `"Unknown"` when no title candidate (TextView/Toolbar/ActionBar) was found within depth 10 of the window root; normal for full-screen apps/games |
 | `find` | `text`, `role` | Searches the last `observe()` result for a matching element |
 | `scroll_until` | `text`, `direction`, `maxScrolls` | Scrolls until an element with matching text is visible |
 | `diag_sealed` | `elementId` | Diagnostic: tests node sealed lifecycle (development aid) |
@@ -183,7 +183,7 @@ curl -X POST http://<PHONE_IP>:8765/mcp \
 curl -X POST http://<PHONE_IP>:8765/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <TOKEN>" \
-  -d '{"jsonrpc":"2.0","id":"4","method":"tools/call","params":{"name":"click_node","arguments":{"nodeId":27}}}'
+  -d '{"jsonrpc":"2.0","id":"4","method":"tools/call","params":{"name":"click_node","arguments":{"id":"1:7"}}}'
 ```
 
 ## Example MCP Client Configuration

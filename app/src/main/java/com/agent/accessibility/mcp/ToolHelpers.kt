@@ -25,6 +25,27 @@ internal const val CONTAINS_MATCH_SCORE = 800
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 /**
+ * Error when no element id is supplied at all. Names the canonical field
+ * and lists the accepted legacy aliases. Never reports the empty value.
+ */
+internal const val ELEMENT_ID_MISSING_MESSAGE =
+    "missing required field 'id' (element id from observe, e.g. \"1:7\"; " +
+        "legacy aliases 'elementId'/'nodeId' accepted)"
+
+/**
+ * First non-blank element id across the canonical key and its legacy
+ * aliases, or null when none is present. `id` wins, then `elementId`,
+ * then `nodeId`, so old clients keep working.
+ */
+internal fun parseElementIdRaw(args: JSONObject): String? {
+    for (key in listOf("id", "elementId", "nodeId")) {
+        val value = args.optString(key, "")
+        if (value.isNotBlank()) return value
+    }
+    return null
+}
+
+/**
  * Parsed element ID from tool arguments.
  * Returns (elementId, errorResponse) — if errorResponse is non-null, the caller should return it.
  */
@@ -33,8 +54,11 @@ internal fun parseElementId(
     id: String,
     handler: McpHandler
 ): Pair<ElementId?, String?> {
-    val raw = args.optString("id", args.optString("elementId", ""))
+    val raw = parseElementIdRaw(args)
     Log.d(TAG, "parseElementId: raw='$raw' keys=${args.keys().asSequence().toList()}")
+    if (raw == null) {
+        return null to handler.toolErrorResponse(id, ELEMENT_ID_MISSING_MESSAGE)
+    }
     val decoded = ElementId.decode(raw)
     if (decoded == null) {
         return null to handler.toolErrorResponse(id, "invalid_element_id: \"$raw\" is not a valid element id")

@@ -20,6 +20,42 @@ import org.json.JSONObject
  * Implements get_screen_state, observe, find, scroll_until and diag_sealed.
  */
 
+/**
+ * Screen-state block of the observe() envelope (R-13).
+ */
+data class ScreenState(
+    val state: String,
+    val keyboardVisible: Boolean,
+    val dialogVisible: Boolean
+)
+
+/**
+ * Canonical observe() envelope (R-13). EVERY observe path returns exactly
+ * these top-level keys — no more, no less:
+ *
+ *   app, screenTitle, scrollable, screenHash, elements,
+ *   screenState { state, keyboardVisible, dialogVisible }
+ *
+ * `screenTitle` is always a string. "Unknown" means no title candidate
+ * (TextView/Toolbar/ActionBar) was found within depth 10 of the window
+ * root; it is normal for full-screen apps/games.
+ */
+fun observeEnvelope(scene: SemanticScene, state: ScreenState): JSONObject {
+    val sceneJson = JSONObject(scene.toJson())
+    return JSONObject().apply {
+        put("app", sceneJson.optString("app", "unknown"))
+        put("screenTitle", sceneJson.optString("screenTitle", "Unknown"))
+        put("scrollable", sceneJson.optBoolean("scrollable", false))
+        put("screenHash", sceneJson.optString("screenHash", ""))
+        put("elements", sceneJson.optJSONArray("elements") ?: JSONArray())
+        put("screenState", JSONObject().apply {
+            put("state", state.state)
+            put("keyboardVisible", state.keyboardVisible)
+            put("dialogVisible", state.dialogVisible)
+        })
+    }
+}
+
 internal fun McpHandler.getScreenState(id: String): String {
     val service = AgentAccessibilityService.instance
         ?: return toolErrorResponse(id, "Accessibility service not running. Force-stop Relay, re-open, and re-enable accessibility.")
@@ -249,29 +285,26 @@ internal fun McpHandler.observe(id: String): String {
 
         val scene = SemanticProjector.project(tree, snapshotId, metrics.heightPixels, metrics.widthPixels)
 
-        // Fallback: if projected output is too sparse, use get_screen_state format
-        // This handles dialogs and popups where SemanticProjector filters too aggressively
+        // Fallback: the strict projection filtered everything out. This happens
+        // for dialogs and popups whose nodes carry little text. Project
+        // leniently instead of dumping raw nodes, so the response keeps the
+        // one canonical observe shape and dialogs stay visible to clients.
         val rawNodeCount = tree.totalNodeCount
         val projectedCount = scene.totalDescendantCount()
         if (projectedCount == 0 && rawNodeCount > 0) {
-            // Build a simple list from raw nodes (like get_screen_state)
-            val nodesArray = JSONArray()
-            tree.root?.let { flattenForJson(it, null, nodesArray, snapshotId) }
-            val fallbackJson = JSONObject()
-            fallbackJson.put("packageName", tree.foregroundPackage ?: "unknown")
-            fallbackJson.put("snapshotId", snapshotId)
-            fallbackJson.put("nodes", nodesArray)
-            fallbackJson.put("screenWidth", metrics.widthPixels)
-            fallbackJson.put("screenHeight", metrics.heightPixels)
-            fallbackJson.put("timestamp", System.currentTimeMillis())
-            fallbackJson.put("screenState", JSONObject().apply {
-                put("state", "stable")
-                put("keyboardVisible", false)
-                put("dialogVisible", true)
-            })
+            val sparseScene = SemanticProjector.projectSparse(
+                tree, snapshotId, metrics.heightPixels, metrics.widthPixels
+            )
+            lastScene = sparseScene
+            lastElementCount = sparseScene.totalDescendantCount()
+            val sparseState = ScreenState(
+                state = "stable",
+                keyboardVisible = detectKeyboard(service),
+                dialogVisible = true
+            )
             observeFallbackCount++
-            Log.d(TAG, "observe: projected=0 raw=$rawNodeCount, falling back to raw nodes (fallback #$observeFallbackCount)")
-            return toolSuccessResponse(id, fallbackJson.toString())
+            Log.d(TAG, "observe: projected=0 raw=$rawNodeCount, sparse=${sparseScene.elements.size} elements (fallback #$observeFallbackCount)")
+            return toolSuccessResponse(id, observeEnvelope(sparseScene, sparseState).toString())
         }
 
         val now = System.currentTimeMillis()
@@ -290,13 +323,12 @@ internal fun McpHandler.observe(id: String): String {
         lastElementCount = elementCount
         lastScene = scene
 
-        val json = JSONObject(scene.toJson())
-        json.put("screenState", JSONObject().apply {
-            put("state", if (stable) "stable" else if (transitioning) "transitioning" else "unknown")
-            put("keyboardVisible", keyboardVisible)
-            put("dialogVisible", dialogVisible)
-        })
-        return toolSuccessResponse(id, json.toString())
+        val state = ScreenState(
+            state = if (stable) "stable" else if (transitioning) "transitioning" else "unknown",
+            keyboardVisible = keyboardVisible,
+            dialogVisible = dialogVisible
+        )
+        return toolSuccessResponse(id, observeEnvelope(scene, state).toString())
     } finally {
         @Suppress("DEPRECATION")
         rootNode.recycle()

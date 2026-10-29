@@ -10,6 +10,12 @@ val commitCount = providers.exec {
     commandLine("git", "rev-list", "--count", "HEAD")
 }.standardOutput.asText.get().trim().toIntOrNull() ?: 1
 
+// Release 1.0.113 ships a fixed versionCode/versionName via
+// -PrelayVersionCode=113 -PrelayVersionName=1.0.113. A plain build
+// (no properties) still auto-derives from the commit count.
+val releaseVersionCode = (findProperty("relayVersionCode") as String?)?.toInt() ?: commitCount
+val releaseVersionName = (findProperty("relayVersionName") as String?) ?: "1.0.$releaseVersionCode"
+
 // Fixed signing key so a build can be installed OVER a previous one.
 //
 // Without this, AGP auto-generates a debug keystore per machine — and since every
@@ -39,10 +45,10 @@ android {
         applicationId = "com.agent.accessibility"
         minSdk = 26
         targetSdk = 35
-        versionCode = commitCount
-        versionName = "1.0.$commitCount"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
 
-        buildConfigField("String", "APP_VERSION", "\"1.0.$commitCount\"")
+        buildConfigField("String", "APP_VERSION", "\"$releaseVersionName\"")
     }
 
     signingConfigs {
@@ -111,13 +117,17 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.14.2")
+    // Real org.json for JVM unit tests: android.jar only ships stubs that throw.
+    // Lets tests build/parse the observe envelope, screenshot error envelope
+    // and element-id args without Robolectric.
+    testImplementation("org.json:json:20240303")
 }
 
 // Debug: print version during build
 tasks.configureEach {
     if (name == "assembleDebug") {
         doFirst {
-            println("=== BUILD VERSION: versionCode=$commitCount versionName=1.0.$commitCount ===")
+            println("=== BUILD VERSION: versionCode=$releaseVersionCode versionName=$releaseVersionName ===")
         }
     }
 }

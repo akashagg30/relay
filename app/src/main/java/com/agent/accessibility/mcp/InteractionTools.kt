@@ -87,27 +87,34 @@ private fun McpHandler.attemptClick(
                 return toolErrorResponse(id, "element_disabled: the element is not enabled. Check if a prerequisite action is needed first.")
             }
 
+            // R-1 card 2 (D3): content baseline BEFORE the action. The package
+            // comparison below can no longer serve as screenChanged.
+            val (hashBefore, pkgBefore) = currentScreenObservation(service)
+
             val clickResult = actionTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             val total = System.currentTimeMillis() - startTime
             Log.d(TAG, "[click_node] total=${total}ms (visible click), result=$clickResult")
 
             if (clickResult) {
                 val total = System.currentTimeMillis() - startTime
-                auditLogger.log("click_node", true, "accessibility_click", total, null,
-                    "elementId" to elementId.encode(), "resolutionMethod" to traversal.method)
-
-                // Post-click verification: compare package name to detect screen change
                 Thread.sleep(300)
-                val newRoot = findForegroundRoot(service)
-                val oldPkg = traversal.matchedNode?.packageName?.toString()
-                val newPkg = newRoot?.packageName?.toString()
-                val screenChanged = newPkg != null && newPkg != oldPkg
+                val (hashAfter, pkgAfter) = currentScreenObservation(service)
+                val screenChanged = computeContentChanged(hashBefore, hashAfter)
+                val appChanged = computeAppChanged(pkgBefore, pkgAfter)
+                auditLogger.log("click_node", true, "accessibility_click", total, null,
+                    "elementId" to elementId.encode(), "resolutionMethod" to traversal.method,
+                    "screenHashBefore" to (hashBefore ?: "unknown"),
+                    "screenHashAfter" to (hashAfter ?: "unknown"),
+                    "delivered" to true)
 
                 return toolSuccessResponse(id, JSONObject().apply {
                     put("success", true)
                     put("method", "accessibility_click")
                     put("resolutionMethod", traversal.method)
+                    put("screenHashBefore", hashBefore ?: "unknown")
+                    put("screenHashAfter", hashAfter ?: "unknown")
                     put("screenChanged", screenChanged)
+                    put("appChanged", appChanged)
                 }.toString())
             }
 
@@ -116,23 +123,26 @@ private fun McpHandler.attemptClick(
                 val screenW = getScreenWidth()
                 val screenH = getScreenHeight()
                 if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-                    val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
+                    // R-1/D1: tap the MATCHED node's own rect (clamped to the
+                    // ancestor rect), never the ancestor (container) centre.
+                    val tapRect = NodeResolver.resolveTapRect(traversal.targetBounds, bounds)
+                    val (tapX, tapY) = gesturePointFromBounds(tapRect)
+                    val tapResult = dispatchTap(tapX, tapY)
                     if (tapResult) {
                         Log.d(TAG, "Coordinate fallback succeeded")
-                        // Post-click verification
-                        Thread.sleep(300)
-                        val newRoot = findForegroundRoot(service)
-                        val oldPkg = traversal.matchedNode?.packageName?.toString()
-                        val newPkg = newRoot?.packageName?.toString()
-                        val screenChanged = newPkg != null && newPkg != oldPkg
-                        if (!screenChanged) {
-                            Log.w(TAG, "Coordinate tap succeeded but screen didn't change")
+                        // R-1 card 2 (D1/D2/D4/D5): delivery is verified by a
+                        // post-tap content observation, not by dispatch success.
+                        val boundsSource = if (traversal.clickableAncestor != null) {
+                            "clickable_ancestor"
+                        } else {
+                            "matched_node"
                         }
-                        return toolSuccessResponse(id, JSONObject().apply {
-                            put("success", true)
-                            put("method", "coordinate_fallback")
-                            put("screenChanged", screenChanged)
-                        }.toString())
+                        return assembleVerifiedFallback(
+                            id, service, startTime,
+                            "coordinate_fallback", "coordinate_fallback",
+                            elementId.encode(), tapRect, tapX, tapY, boundsSource,
+                            hashBefore, pkgBefore
+                        )
                     }
                 }
             }
@@ -169,12 +179,28 @@ private fun McpHandler.attemptClick(
 
             val bounds = reTraversal.bounds
             if (NodeResolver.isSaneBounds(bounds)) {
-                val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
+                // R-1/D1: tap the MATCHED node's own rect (clamped to the
+                // ancestor rect), never the ancestor (container) centre.
+                val tapRect = NodeResolver.resolveTapRect(reTraversal.targetBounds, bounds)
+                // Fresh baseline AFTER the scroll (R-1 card 2): the pre-scroll
+                // screen no longer describes what this tap will act on.
+                val (scrollHashBefore, scrollPkgBefore) = currentScreenObservation(service)
+                val (tapX, tapY) = gesturePointFromBounds(tapRect)
+                val tapResult = dispatchTap(tapX, tapY)
                 if (tapResult) {
-                    return toolSuccessResponse(id, JSONObject().apply {
-                        put("success", true)
-                        put("method", "coordinate_fallback_scrolled")
-                    }.toString())
+                    val boundsSource = if (reTraversal.clickableAncestor != null) {
+                        "clickable_ancestor"
+                    } else {
+                        "matched_node"
+                    }
+                    // Same honest method name as the visible fallback (D2/D4):
+                    // scrolled or not, an unverified tap reports tap_unverified.
+                    return assembleVerifiedFallback(
+                        id, service, startTime,
+                        "coordinate_fallback", "coordinate_fallback",
+                        elementId.encode(), tapRect, tapX, tapY, boundsSource,
+                        scrollHashBefore, scrollPkgBefore
+                    )
                 }
             }
             return toolErrorResponse(id, "target_offscreen_unreachable: could not bring target into view")
@@ -234,6 +260,223 @@ private fun scoreDescriptorVsDescriptor(
     return score
 }
 
+/**
+ * R-1 card 2 (honest delivery reporting): outcome of a coordinate tap.
+ *
+ * VERIFIED means the post-tap observation's tree-derived content hash
+ * differs from the pre-tap hash (the tap demonstrably changed the
+ * screen). Anything else — same hash, missing observation, or a dispatch
+ * error — is UNVERIFIED and must be reported as success:false.
+ */
+internal enum class TapOutcome {
+    VERIFIED,
+    UNVERIFIED
+}
+
+/**
+ * Pure delivery classifier (no Android framework types in the signature,
+ * so it is unit-testable on the JVM).
+ */
+internal fun classifyTapOutcome(hashBefore: String?, hashAfter: String?, isError: Boolean): TapOutcome {
+    if (isError) return TapOutcome.UNVERIFIED
+    if (hashBefore == null || hashAfter == null) return TapOutcome.UNVERIFIED
+    return if (hashBefore != hashAfter) TapOutcome.VERIFIED else TapOutcome.UNVERIFIED
+}
+
+/**
+ * Content comparison backing `screenChanged` (D3): tree-derived hashes
+ * differ. Null-safe — a missing observation never claims a change.
+ */
+internal fun computeContentChanged(hashBefore: String?, hashAfter: String?): Boolean {
+    return hashBefore != null && hashAfter != null && hashBefore != hashAfter
+}
+
+/**
+ * Package comparison backing `appChanged` (D3): keeps the old
+ * package-name signal expressible for the R-1 adjacent-control check
+ * without overloading it as a screen-change detector.
+ */
+internal fun computeAppChanged(pkgBefore: String?, pkgAfter: String?): Boolean {
+    return pkgBefore != null && pkgAfter != null && pkgBefore != pkgAfter
+}
+
+/**
+ * Report assembled for a dispatched coordinate tap. `delivered` drives
+ * `success`; when false the result carries reason "tap_unverified" (D2).
+ */
+internal data class FallbackReport(
+    val delivered: Boolean,
+    val screenHashBefore: String,
+    val screenHashAfter: String,
+    val screenChanged: Boolean,
+    val appChanged: Boolean,
+    val tapX: Int,
+    val tapY: Int,
+    val bounds: String,
+    val boundsSource: String
+)
+
+private fun jsonQuoted(raw: String): String {
+    return "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+}
+
+/**
+ * Deterministic result-object JSON for the coordinate-fallback path.
+ * Hand-rolled with fixed key order because org.json is Android-only and
+ * unavailable under JVM unit tests — the R-1 truth tests assert this
+ * string character for character.
+ */
+internal fun buildFallbackResultJson(method: String, report: FallbackReport): String {
+    val sb = StringBuilder()
+    sb.append("{")
+    sb.append("\"success\":").append(if (report.delivered) "true" else "false")
+    sb.append(",\"delivered\":").append(if (report.delivered) "true" else "false")
+    sb.append(",\"method\":").append(jsonQuoted(method))
+    if (!report.delivered) {
+        sb.append(",\"reason\":").append(jsonQuoted("tap_unverified"))
+    }
+    sb.append(",\"screenHashBefore\":").append(jsonQuoted(report.screenHashBefore))
+    sb.append(",\"screenHashAfter\":").append(jsonQuoted(report.screenHashAfter))
+    sb.append(",\"screenChanged\":").append(if (report.screenChanged) "true" else "false")
+    sb.append(",\"appChanged\":").append(if (report.appChanged) "true" else "false")
+    sb.append(",\"tapX\":").append(report.tapX)
+    sb.append(",\"tapY\":").append(report.tapY)
+    sb.append(",\"bounds\":").append(jsonQuoted(report.bounds))
+    sb.append(",\"boundsSource\":").append(jsonQuoted(report.boundsSource))
+    sb.append("}")
+    return sb.toString()
+}
+
+/**
+ * Audit context for the coordinate-fallback branch (D4). Pure so the key
+ * set is unit-testable; the caller splats it into
+ * auditLogger.log("click_node", delivered, method, ms, null, *pairs).
+ * statusBarHeight is reported (0: gesture coords are screen-absolute per
+ * card 1) — never subtracted.
+ */
+internal fun fallbackAuditPairs(
+    elementId: String,
+    boundsSource: String,
+    bounds: String,
+    tapX: Int,
+    tapY: Int,
+    statusBarHeight: Int,
+    screenHashBefore: String,
+    screenHashAfter: String,
+    delivered: Boolean
+): Array<Pair<String, Any>> {
+    return arrayOf(
+        "elementId" to elementId,
+        "boundsSource" to boundsSource,
+        "bounds" to bounds,
+        "tapX" to tapX,
+        "tapY" to tapY,
+        "statusBarHeight" to statusBarHeight,
+        "screenHashBefore" to screenHashBefore,
+        "screenHashAfter" to screenHashAfter,
+        "delivered" to delivered
+    )
+}
+
+/**
+ * One content observation: tree-derived screen hash (element ids are
+ * excluded by SemanticScene.computeScreenHash) plus the foreground
+ * package. Never throws; returns (null, null) when no window is readable.
+ */
+internal fun McpHandler.currentScreenObservation(service: AgentAccessibilityService): Pair<String?, String?> {
+    val root = try {
+        findForegroundRoot(service)
+    } catch (_: Exception) {
+        null
+    } ?: return Pair(null, null)
+    return try {
+        val tree = com.agent.accessibility.service.AccessibilityTreeReader.readTree(root)
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(metrics)
+        val scene = SemanticProjector.project(tree, -1L, metrics.heightPixels, metrics.widthPixels)
+        Pair(scene.computeScreenHash(), scene.app)
+    } catch (_: Exception) {
+        Pair(null, null)
+    } finally {
+        try {
+            root.recycle()
+        } catch (_: Exception) {
+            // Best effort: the observation must never break the click path.
+        }
+    }
+}
+
+/**
+ * Post-tap verification window (D5): hash 300ms after the tap (the
+ * pre-existing sleep); if the hash is unchanged, hash once more after
+ * 800ms before the caller declares tap_unverified. Returns the final
+ * (hash, package) pair.
+ */
+internal fun McpHandler.observePostTap(
+    service: AgentAccessibilityService,
+    hashBefore: String?
+): Pair<String?, String?> {
+    Thread.sleep(300)
+    var observed = currentScreenObservation(service)
+    if (hashBefore != null && observed.first == hashBefore) {
+        Thread.sleep(800)
+        observed = currentScreenObservation(service)
+    }
+    return observed
+}
+
+/**
+ * Shared tail of both coordinate-fallback sites (visible + scrolled):
+ * D5 verification window, D2 verified/unverified result assembly, D4
+ * audit entry. Call only after the tap was dispatched (tapResult true).
+ */
+private fun McpHandler.assembleVerifiedFallback(
+    id: String,
+    service: AgentAccessibilityService,
+    startTime: Long,
+    resultMethod: String,
+    auditMethod: String,
+    elementIdStr: String,
+    tapRect: Rect,
+    tapX: Int,
+    tapY: Int,
+    boundsSource: String,
+    hashBefore: String?,
+    pkgBefore: String?
+): String {
+    val (hashAfter, pkgAfter) = observePostTap(service, hashBefore)
+    val screenChanged = computeContentChanged(hashBefore, hashAfter)
+    val appChanged = computeAppChanged(pkgBefore, pkgAfter)
+    val delivered = classifyTapOutcome(hashBefore, hashAfter, false) == TapOutcome.VERIFIED
+    if (!delivered) {
+        Log.w(TAG, "[click_node] coordinate tap unverified: screen hash unchanged")
+    }
+    val total = System.currentTimeMillis() - startTime
+    val boundsStr = "${tapRect.left},${tapRect.top},${tapRect.right},${tapRect.bottom}"
+    auditLogger.log(
+        "click_node", delivered, auditMethod, total, null,
+        *fallbackAuditPairs(
+            elementIdStr, boundsSource, boundsStr,
+            tapX, tapY, 0,
+            hashBefore ?: "unknown", hashAfter ?: "unknown", delivered
+        )
+    )
+    val report = FallbackReport(
+        delivered = delivered,
+        screenHashBefore = hashBefore ?: "unknown",
+        screenHashAfter = hashAfter ?: "unknown",
+        screenChanged = screenChanged,
+        appChanged = appChanged,
+        tapX = tapX,
+        tapY = tapY,
+        bounds = boundsStr,
+        boundsSource = boundsSource
+    )
+    return toolSuccessResponse(id, buildFallbackResultJson(resultMethod, report))
+}
+
 internal fun McpHandler.performClick(
     id: String,
     target: AccessibilityNodeInfo,
@@ -267,13 +510,15 @@ internal fun McpHandler.performClick(
         }
     }
 
-    // 3. Coordinate fallback — ONLY with sane, visible bounds from current target
+    // 3. Coordinate fallback — ONLY with sane, visible bounds from current target.
+    // R-1/D2: bounds here are already the target's own rect; convert with NO
+    // status-bar subtraction (gesture coords are screen-absolute).
     val bounds = getNodeBounds(target)
     if (bounds != null && NodeResolver.isSaneBounds(bounds)) {
         val screenW = getScreenWidth()
         val screenH = getScreenHeight()
         if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-            val tapResult = run { val (gx, gy) = boundsToGestureCoords(bounds); dispatchTap(gx, gy) }
+            val tapResult = run { val (gx, gy) = gesturePointFromBounds(bounds); dispatchTap(gx, gy) }
             if (tapResult) {
                 Log.d(TAG, "Coordinate fallback succeeded ($method)")
                 return toolSuccessResponse(id, JSONObject().apply {
@@ -524,14 +769,6 @@ internal fun McpHandler.getScreenHeight(): Int {
 }
 
 /**
- * Get status bar height in pixels.
- */
-private fun McpHandler.getStatusBarHeight(): Int {
-    val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-    return if (resourceId > 0) context.resources.getDimensionPixelSize(resourceId) else 0
-}
-
-/**
  * Get navigation bar height in pixels.
  */
 private fun McpHandler.getNavigationBarHeight(): Int {
@@ -540,13 +777,24 @@ private fun McpHandler.getNavigationBarHeight(): Int {
 }
 
 /**
- * Convert accessibility bounds center to gesture coordinates.
- * Accessibility bounds include status bar offset, gesture coordinates don't.
+ * Convert a bounds rect to screen-absolute gesture coordinates.
+ *
+ * R-1/D2: NO status-bar subtraction. getBoundsInScreen() is screen-absolute
+ * and dispatchGesture() takes screen-absolute coords — proven by swipe
+ * parity on-device (same point, one minute apart, same screenHash
+ * 96a3fc93c8c30b99): click_node{id 565:32} via coordinate_fallback missed
+ * (screenHash unchanged) while swipe{540,1331 -> 544,1335} launched the
+ * experience (screenHash c59636ea73b44ae7, "Loading..."). The old
+ * centerY-minus-status-bar term shifted every fallback tap up by the
+ * status-bar height and is deleted, not kept.
+ *
+ * Pure (no McpHandler receiver) so it is unit-testable on the JVM. Uses
+ * field access only: android.graphics.Rect methods are stubs under unit
+ * tests; for screen coords (left+right) shr 1 == centerX().
  */
-private fun McpHandler.boundsToGestureCoords(bounds: Rect): Pair<Int, Int> {
-    val statusBarHeight = getStatusBarHeight()
-    val x = bounds.centerX()
-    val y = bounds.centerY() - statusBarHeight
+internal fun gesturePointFromBounds(rect: Rect): Pair<Int, Int> {
+    val x = (rect.left + rect.right) shr 1
+    val y = (rect.top + rect.bottom) shr 1
     return Pair(x, y.coerceAtLeast(0))
 }
 

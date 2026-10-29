@@ -117,6 +117,13 @@ data class FreshTraversalResult(
     val method: String,
     val clickableAncestor: AccessibilityNodeInfo?,
     val bounds: Rect,
+    /**
+     * R-1/D1: the MATCHED node's own bounds. The coordinate fallback derives
+     * its tap point from this rect, never from [bounds] (the clickable
+     * ancestor's rect, which for RN rows is a container). [bounds] stays as
+     * the clamp/visibility bound used by card 2 reporting.
+     */
+    val targetBounds: Rect,
     val isVisible: Boolean,
     val rootNode: AccessibilityNodeInfo
 )
@@ -340,8 +347,14 @@ object NodeResolver {
 
         val logical = getLogicalActionableTarget(matchedNode, descriptor)
         val isVisible = isLogicalTargetVisible(matchedNode, logical.clickableAncestor)
+        // R-1/D1: capture BOTH rects — the matched node's own rect (the
+        // fallback tap point) and the clickable ancestor's rect (used only
+        // as a clamp/visibility bound, never as the tap point).
+        val targetBounds = Rect()
+        matchedNode.getBoundsInScreen(targetBounds)
         val bounds = Rect()
-        (logical.clickableAncestor ?: matchedNode).getBoundsInScreen(bounds)
+        val ancestorTarget = logical.clickableAncestor ?: matchedNode
+        ancestorTarget.getBoundsInScreen(bounds)
 
         val ancestorToKeep = logical.clickableAncestor
         for (i in liveNodes.indices) {
@@ -356,6 +369,7 @@ object NodeResolver {
             method = "single_match",
             clickableAncestor = ancestorToKeep,
             bounds = bounds,
+            targetBounds = targetBounds,
             isVisible = isVisible,
             rootNode = root
         )
@@ -515,6 +529,49 @@ object NodeResolver {
 
     fun isSaneBounds(left: Int, top: Int, right: Int, bottom: Int): Boolean {
         return right > left && bottom > top
+    }
+
+    /**
+     * R-1/D1: tap rect for the coordinate fallback.
+     *
+     * The tap point is the MATCHED node's own rect centre, clamped to the
+     * intersection with the clickable ancestor's rect when that intersection
+     * is sane. The ancestor rect is used only as a clamp/visibility bound,
+     * never as the tap point: for RN rows the clickable ancestor is a
+     * CONTAINER, and tapping its centre lands on the adjacent control.
+     *
+     * Field access only (no Rect methods) so this stays unit-testable on the
+     * JVM, where android.graphics.Rect methods are stubs.
+     */
+    fun resolveTapRect(targetBounds: Rect, ancestorBounds: Rect?): Rect {
+        if (ancestorBounds == null || !isSaneBounds(ancestorBounds)) {
+            return copyRect(targetBounds)
+        }
+        if (!isSaneBounds(targetBounds)) {
+            return copyRect(ancestorBounds)
+        }
+        val left = maxOf(targetBounds.left, ancestorBounds.left)
+        val top = maxOf(targetBounds.top, ancestorBounds.top)
+        val right = minOf(targetBounds.right, ancestorBounds.right)
+        val bottom = minOf(targetBounds.bottom, ancestorBounds.bottom)
+        if (!isSaneBounds(left, top, right, bottom)) {
+            return copyRect(targetBounds)
+        }
+        val out = Rect()
+        out.left = left
+        out.top = top
+        out.right = right
+        out.bottom = bottom
+        return out
+    }
+
+    private fun copyRect(rect: Rect): Rect {
+        val out = Rect()
+        out.left = rect.left
+        out.top = rect.top
+        out.right = rect.right
+        out.bottom = rect.bottom
+        return out
     }
 
     fun getLogicalActionableTarget(

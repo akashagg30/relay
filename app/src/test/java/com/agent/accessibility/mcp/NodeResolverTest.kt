@@ -821,6 +821,7 @@ class NodeResolverTest {
             method = "single_match",
             clickableAncestor = null,
             bounds = bounds,
+            targetBounds = bounds,
             isVisible = true,
             rootNode = mockRoot
         )
@@ -847,6 +848,7 @@ class NodeResolverTest {
             method = "single_match",
             clickableAncestor = mockAncestor,
             bounds = bounds,
+            targetBounds = bounds,
             isVisible = true,
             rootNode = mockRoot
         )

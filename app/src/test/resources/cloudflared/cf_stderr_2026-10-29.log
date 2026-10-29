@@ -1,0 +1,7 @@
+D CloudflareTunnel: Starting cloudflared in place: /data/app/lib/arm64/libcloudflared.so (port=8765)
+D CloudflareTunnel: TunnelProcess: started (port=8765)
+D CloudflareTunnel: TunnelProcess: INF Requesting new quick Tunnel on trycloudflare.com...
+D CloudflareTunnel: TunnelProcess: failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel":
+D CloudflareTunnel: TunnelProcess: dial tcp: lookup api.trycloudflare.com on [::1]:53: read udp [::1]:38930->[::1]:53: read: connection refused
+D CloudflareTunnel: TunnelProcess: public URL: https://api.trycloudflare.com/tunnel":
+D CloudflareTunnel: TunnelProcess: exited with code 1

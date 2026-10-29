@@ -51,7 +51,9 @@ class R1TruthTest {
             tapX = 540,
             tapY = 1331,
             bounds = "44,1254,1036,1408",
-            boundsSource = "matched_node"
+            boundsSource = "matched_node",
+            targetBounds = "44,1254,1036,1408",
+            tapInsideTarget = true
         )
         val expected = "{\"success\":false,\"delivered\":false," +
             "\"method\":\"coordinate_fallback\",\"reason\":\"tap_unverified\"," +
@@ -59,7 +61,8 @@ class R1TruthTest {
             "\"screenHashAfter\":\"96a3fc93c8c30b99\"," +
             "\"screenChanged\":false,\"appChanged\":false," +
             "\"tapX\":540,\"tapY\":1331," +
-            "\"bounds\":\"44,1254,1036,1408\",\"boundsSource\":\"matched_node\"}"
+            "\"bounds\":\"44,1254,1036,1408\",\"boundsSource\":\"matched_node\"," +
+            "\"targetBounds\":\"44,1254,1036,1408\",\"tapInsideTarget\":true}"
         assertEquals(expected, buildFallbackResultJson("coordinate_fallback", report))
     }
 
@@ -74,7 +77,9 @@ class R1TruthTest {
             tapX = 540,
             tapY = 1331,
             bounds = "44,1254,1036,1408",
-            boundsSource = "matched_node"
+            boundsSource = "matched_node",
+            targetBounds = "44,1254,1036,1408",
+            tapInsideTarget = true
         )
         val expected = "{\"success\":true,\"delivered\":true," +
             "\"method\":\"coordinate_fallback\"," +
@@ -82,7 +87,8 @@ class R1TruthTest {
             "\"screenHashAfter\":\"44986b0ccc1c5869\"," +
             "\"screenChanged\":true,\"appChanged\":false," +
             "\"tapX\":540,\"tapY\":1331," +
-            "\"bounds\":\"44,1254,1036,1408\",\"boundsSource\":\"matched_node\"}"
+            "\"bounds\":\"44,1254,1036,1408\",\"boundsSource\":\"matched_node\"," +
+            "\"targetBounds\":\"44,1254,1036,1408\",\"tapInsideTarget\":true}"
         assertEquals(expected, buildFallbackResultJson("coordinate_fallback", report))
     }
 

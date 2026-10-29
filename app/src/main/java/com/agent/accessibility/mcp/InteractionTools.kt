@@ -118,33 +118,39 @@ private fun McpHandler.attemptClick(
                 }.toString())
             }
 
-            val bounds = traversal.bounds
-            if (NodeResolver.isSaneBounds(bounds)) {
-                val screenW = getScreenWidth()
-                val screenH = getScreenHeight()
-                if (bounds.centerX() in 0..screenW && bounds.centerY() in 0..screenH) {
-                    // R-1/D1: tap the MATCHED node's own rect (clamped to the
-                    // ancestor rect), never the ancestor (container) centre.
-                    val tapRect = NodeResolver.resolveTapRect(traversal.targetBounds, bounds)
-                    val (tapX, tapY) = gesturePointFromBounds(tapRect)
-                    val tapResult = dispatchTap(tapX, tapY)
-                    if (tapResult) {
-                        Log.d(TAG, "Coordinate fallback succeeded")
-                        // R-1 card 2 (D1/D2/D4/D5): delivery is verified by a
-                        // post-tap content observation, not by dispatch success.
-                        val boundsSource = if (traversal.clickableAncestor != null) {
-                            "clickable_ancestor"
-                        } else {
-                            "matched_node"
-                        }
-                        return assembleVerifiedFallback(
-                            id, service, startTime,
-                            "coordinate_fallback", "coordinate_fallback",
-                            elementId.encode(), tapRect, tapX, tapY, boundsSource,
-                            hashBefore, pkgBefore
-                        )
-                    }
-                }
+            // 1.0.114 (R-1 remaining): the coordinate fallback is decided by
+            // planFallbackTap, which REFUSES a degenerate (screen-sized) rect
+            // instead of tapping its centre, and anchors the tap inside the
+            // element's own rect from the snapshot the id came from.
+            val screenW = getScreenWidth()
+            val screenH = getScreenHeight()
+            val plan = planFallbackTap(
+                liveBounds = traversal.targetBounds,
+                ancestorBounds = traversal.bounds,
+                anchorBounds = descriptorBoundsRect(descriptor),
+                screenWidth = screenW,
+                screenHeight = screenH
+            )
+            if (plan is TapPlan.Refused) {
+                return refuseFallback(
+                    id, startTime,
+                    "coordinate_fallback", "coordinate_fallback",
+                    elementId.encode(), plan
+                )
+            }
+            plan as TapPlan.Tap
+            val tapResult = executeFallbackPlan(plan) { x, y -> dispatchTap(x, y) }
+            if (tapResult) {
+                Log.d(TAG, "Coordinate fallback dispatched at (${plan.x},${plan.y})")
+                // R-1 card 2 (D1/D2/D4/D5) + 1.0.114: delivery is verified by a
+                // post-tap content observation AND by the tap point being inside
+                // the requested element's rect.
+                return assembleVerifiedFallback(
+                    id, service, startTime,
+                    "coordinate_fallback", "coordinate_fallback",
+                    elementId.encode(), plan,
+                    hashBefore, pkgBefore
+                )
             }
             return toolErrorResponse(id, "action_failed: node resolved but click/ancestor actions " +
                 "failed. resolutionMethod=${traversal.method}")
@@ -177,31 +183,41 @@ private fun McpHandler.attemptClick(
                 }.toString())
             }
 
-            val bounds = reTraversal.bounds
-            if (NodeResolver.isSaneBounds(bounds)) {
-                // R-1/D1: tap the MATCHED node's own rect (clamped to the
-                // ancestor rect), never the ancestor (container) centre.
-                val tapRect = NodeResolver.resolveTapRect(reTraversal.targetBounds, bounds)
-                // Fresh baseline AFTER the scroll (R-1 card 2): the pre-scroll
-                // screen no longer describes what this tap will act on.
-                val (scrollHashBefore, scrollPkgBefore) = currentScreenObservation(service)
-                val (tapX, tapY) = gesturePointFromBounds(tapRect)
-                val tapResult = dispatchTap(tapX, tapY)
-                if (tapResult) {
-                    val boundsSource = if (reTraversal.clickableAncestor != null) {
-                        "clickable_ancestor"
-                    } else {
-                        "matched_node"
-                    }
-                    // Same honest method name as the visible fallback (D2/D4):
-                    // scrolled or not, an unverified tap reports tap_unverified.
-                    return assembleVerifiedFallback(
-                        id, service, startTime,
-                        "coordinate_fallback", "coordinate_fallback",
-                        elementId.encode(), tapRect, tapX, tapY, boundsSource,
-                        scrollHashBefore, scrollPkgBefore
-                    )
-                }
+            // 1.0.114: same planner as the visible path. The pre-scroll
+            // descriptor rect is stale after a scroll, so the FRESH traversal
+            // rect is the delivery anchor here — a scroll legitimately moves
+            // the element, and the degenerate check still refuses a
+            // screen-sized (root) match.
+            val screenW = getScreenWidth()
+            val screenH = getScreenHeight()
+            val scrollPlan = planFallbackTap(
+                liveBounds = reTraversal.targetBounds,
+                ancestorBounds = reTraversal.bounds,
+                anchorBounds = reTraversal.targetBounds,
+                screenWidth = screenW,
+                screenHeight = screenH
+            )
+            if (scrollPlan is TapPlan.Refused) {
+                return refuseFallback(
+                    id, startTime,
+                    "coordinate_fallback", "coordinate_fallback",
+                    elementId.encode(), scrollPlan
+                )
+            }
+            scrollPlan as TapPlan.Tap
+            // Fresh baseline AFTER the scroll (R-1 card 2): the pre-scroll
+            // screen no longer describes what this tap will act on.
+            val (scrollHashBefore, scrollPkgBefore) = currentScreenObservation(service)
+            val tapResult = executeFallbackPlan(scrollPlan) { x, y -> dispatchTap(x, y) }
+            if (tapResult) {
+                // Same honest method name as the visible fallback (D2/D4):
+                // scrolled or not, an unverified tap reports tap_unverified.
+                return assembleVerifiedFallback(
+                    id, service, startTime,
+                    "coordinate_fallback", "coordinate_fallback",
+                    elementId.encode(), scrollPlan,
+                    scrollHashBefore, scrollPkgBefore
+                )
             }
             return toolErrorResponse(id, "target_offscreen_unreachable: could not bring target into view")
         } finally {
@@ -302,7 +318,13 @@ internal fun computeAppChanged(pkgBefore: String?, pkgAfter: String?): Boolean {
 
 /**
  * Report assembled for a dispatched coordinate tap. `delivered` drives
- * `success`; when false the result carries reason "tap_unverified" (D2).
+ * `success`; when false the result carries reason "tap_unverified" (D2) or
+ * "tap_outside_target" (1.0.114: the tap point was not inside the requested
+ * target's rect, so a screen change cannot be credited to this target).
+ *
+ * `bounds` is the rect the tap was derived from; `targetBounds` is the rect
+ * the element id came from (what `observe`/`find` printed) and therefore the
+ * rect delivery is judged against.
  */
 internal data class FallbackReport(
     val delivered: Boolean,
@@ -313,7 +335,9 @@ internal data class FallbackReport(
     val tapX: Int,
     val tapY: Int,
     val bounds: String,
-    val boundsSource: String
+    val boundsSource: String,
+    val targetBounds: String = "",
+    val tapInsideTarget: Boolean = true
 )
 
 private fun jsonQuoted(raw: String): String {
@@ -333,7 +357,7 @@ internal fun buildFallbackResultJson(method: String, report: FallbackReport): St
     sb.append(",\"delivered\":").append(if (report.delivered) "true" else "false")
     sb.append(",\"method\":").append(jsonQuoted(method))
     if (!report.delivered) {
-        sb.append(",\"reason\":").append(jsonQuoted("tap_unverified"))
+        sb.append(",\"reason\":").append(jsonQuoted(fallbackFailureReason(report.tapInsideTarget)))
     }
     sb.append(",\"screenHashBefore\":").append(jsonQuoted(report.screenHashBefore))
     sb.append(",\"screenHashAfter\":").append(jsonQuoted(report.screenHashAfter))
@@ -343,6 +367,35 @@ internal fun buildFallbackResultJson(method: String, report: FallbackReport): St
     sb.append(",\"tapY\":").append(report.tapY)
     sb.append(",\"bounds\":").append(jsonQuoted(report.bounds))
     sb.append(",\"boundsSource\":").append(jsonQuoted(report.boundsSource))
+    sb.append(",\"targetBounds\":").append(jsonQuoted(report.targetBounds))
+    sb.append(",\"tapInsideTarget\":").append(if (report.tapInsideTarget) "true" else "false")
+    sb.append("}")
+    return sb.toString()
+}
+
+/**
+ * Result for a REFUSED coordinate tap (1.0.114): no gesture was dispatched, so
+ * there is no tapX/tapY to report — only the rects that produced the refusal.
+ * `success:false, delivered:false, reason:"degenerate_bounds"` is the contract
+ * Executive's device run asserted against.
+ */
+internal fun buildRefusedFallbackJson(
+    method: String,
+    reason: String,
+    elementId: String,
+    liveBounds: String,
+    targetBounds: String
+): String {
+    val sb = StringBuilder()
+    sb.append("{\"success\":false")
+    sb.append(",\"delivered\":false")
+    sb.append(",\"method\":").append(jsonQuoted(method))
+    sb.append(",\"reason\":").append(jsonQuoted(reason))
+    sb.append(",\"elementId\":").append(jsonQuoted(elementId))
+    sb.append(",\"bounds\":").append(jsonQuoted(liveBounds))
+    sb.append(",\"boundsSource\":").append(jsonQuoted(BOUNDS_SOURCE_MATCHED_NODE))
+    sb.append(",\"targetBounds\":").append(jsonQuoted(targetBounds))
+    sb.append(",\"gestureDispatched\":false")
     sb.append("}")
     return sb.toString()
 }
@@ -363,7 +416,10 @@ internal fun fallbackAuditPairs(
     statusBarHeight: Int,
     screenHashBefore: String,
     screenHashAfter: String,
-    delivered: Boolean
+    delivered: Boolean,
+    targetBounds: String = "",
+    tapInsideTarget: Boolean = true,
+    gestureDispatched: Boolean = true
 ): Array<Pair<String, Any>> {
     return arrayOf(
         "elementId" to elementId,
@@ -374,7 +430,13 @@ internal fun fallbackAuditPairs(
         "statusBarHeight" to statusBarHeight,
         "screenHashBefore" to screenHashBefore,
         "screenHashAfter" to screenHashAfter,
-        "delivered" to delivered
+        "delivered" to delivered,
+        // 1.0.114: the target-anchored facts. `delivered` is only true when
+        // tapInsideTarget AND the hash moved; both are recorded so a device
+        // audit can tell a wrong-target tap from an inert one.
+        "targetBounds" to targetBounds,
+        "tapInsideTarget" to tapInsideTarget,
+        "gestureDispatched" to gestureDispatched
     )
 }
 
@@ -431,6 +493,11 @@ internal fun McpHandler.observePostTap(
  * Shared tail of both coordinate-fallback sites (visible + scrolled):
  * D5 verification window, D2 verified/unverified result assembly, D4
  * audit entry. Call only after the tap was dispatched (tapResult true).
+ *
+ * 1.0.114: delivery is TARGET-ANCHORED — the screen-hash change only counts
+ * when the tap point lies inside the requested element's own rect, so a
+ * wrong-target tap (carpool detail, rating dialog) is reported as a failure
+ * instead of `delivered:true`.
  */
 private fun McpHandler.assembleVerifiedFallback(
     id: String,
@@ -439,28 +506,37 @@ private fun McpHandler.assembleVerifiedFallback(
     resultMethod: String,
     auditMethod: String,
     elementIdStr: String,
-    tapRect: Rect,
-    tapX: Int,
-    tapY: Int,
-    boundsSource: String,
+    plan: TapPlan.Tap,
     hashBefore: String?,
     pkgBefore: String?
 ): String {
     val (hashAfter, pkgAfter) = observePostTap(service, hashBefore)
     val screenChanged = computeContentChanged(hashBefore, hashAfter)
     val appChanged = computeAppChanged(pkgBefore, pkgAfter)
-    val delivered = classifyTapOutcome(hashBefore, hashAfter, false) == TapOutcome.VERIFIED
+    val delivered = classifyAnchoredTapOutcome(
+        hashBefore, hashAfter, false, plan.insideTarget
+    ) == TapOutcome.VERIFIED
     if (!delivered) {
-        Log.w(TAG, "[click_node] coordinate tap unverified: screen hash unchanged")
+        if (plan.insideTarget) {
+            Log.w(TAG, "[click_node] coordinate tap unverified: screen hash unchanged")
+        } else {
+            Log.w(
+                TAG,
+                "[click_node] coordinate tap outside target rect: tap=(${plan.x},${plan.y}) " +
+                    "targetBounds=${fallbackRectToString(plan.targetBounds)}"
+            )
+        }
     }
     val total = System.currentTimeMillis() - startTime
-    val boundsStr = "${tapRect.left},${tapRect.top},${tapRect.right},${tapRect.bottom}"
+    val boundsStr = fallbackRectToString(plan.tapRect)
+    val targetStr = fallbackRectToString(plan.targetBounds)
     auditLogger.log(
         "click_node", delivered, auditMethod, total, null,
         *fallbackAuditPairs(
-            elementIdStr, boundsSource, boundsStr,
-            tapX, tapY, 0,
-            hashBefore ?: "unknown", hashAfter ?: "unknown", delivered
+            elementIdStr, plan.boundsSource, boundsStr,
+            plan.x, plan.y, 0,
+            hashBefore ?: "unknown", hashAfter ?: "unknown", delivered,
+            targetStr, plan.insideTarget, true
         )
     )
     val report = FallbackReport(
@@ -469,12 +545,52 @@ private fun McpHandler.assembleVerifiedFallback(
         screenHashAfter = hashAfter ?: "unknown",
         screenChanged = screenChanged,
         appChanged = appChanged,
-        tapX = tapX,
-        tapY = tapY,
+        tapX = plan.x,
+        tapY = plan.y,
         bounds = boundsStr,
-        boundsSource = boundsSource
+        boundsSource = plan.boundsSource,
+        targetBounds = targetStr,
+        tapInsideTarget = plan.insideTarget
     )
     return toolSuccessResponse(id, buildFallbackResultJson(resultMethod, report))
+}
+
+/**
+ * 1.0.114 refusal tail: a plan that is [TapPlan.Refused] must NOT dispatch a
+ * gesture. Returns the deterministic failure envelope and logs the refusal so
+ * the device audit trail shows a refused tap as a refusal, not a silent no-op.
+ */
+private fun McpHandler.refuseFallback(
+    id: String,
+    startTime: Long,
+    resultMethod: String,
+    auditMethod: String,
+    elementIdStr: String,
+    refusal: TapPlan.Refused
+): String {
+    val total = System.currentTimeMillis() - startTime
+    Log.w(
+        TAG,
+        "[click_node] coordinate fallback REFUSED (${refusal.reason}): " +
+            "liveBounds=${refusal.liveBounds} targetBounds=${refusal.targetBounds} " +
+            "— no gesture dispatched"
+    )
+    auditLogger.log(
+        "click_node", false, auditMethod, total, refusal.reason,
+        *fallbackAuditPairs(
+            elementIdStr, BOUNDS_SOURCE_MATCHED_NODE, refusal.liveBounds,
+            0, 0, 0,
+            "unknown", "unknown", false,
+            refusal.targetBounds, false, false
+        )
+    )
+    return toolSuccessResponse(
+        id,
+        buildRefusedFallbackJson(
+            resultMethod, refusal.reason, elementIdStr,
+            refusal.liveBounds, refusal.targetBounds
+        )
+    )
 }
 
 internal fun McpHandler.performClick(

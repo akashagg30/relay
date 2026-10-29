@@ -13,10 +13,10 @@ import org.junit.Test
 
 class TunnelUrlParserTest {
 
-    private fun fixtureLines(): List<String> {
+    private fun fixtureLines(name: String = "cf_stderr_2026-10-28.log"): List<String> {
         val stream = javaClass.classLoader!!
-            .getResourceAsStream("cloudflared/cf_stderr_2026-10-28.log")
-            ?: throw IllegalStateException("fixture missing from test classpath")
+            .getResourceAsStream("cloudflared/$name")
+            ?: throw IllegalStateException("fixture missing from test classpath: $name")
         return stream.bufferedReader().use { it.readLines() }
     }
 
@@ -77,6 +77,57 @@ class TunnelUrlParserTest {
         assertEquals(
             "https://patch-cassette-golden-carb.trycloudflare.com",
             hits.single()
+        )
+    }
+
+    // --- 2026-10-29 regression: the Android DNS failure line must NOT look like a URL ---
+
+    @Test
+    fun `captured dns-failure line yields no url`() {
+        val captured = "D CloudflareTunnel: TunnelProcess: " +
+            "failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\":"
+        assertNull(TunnelUrlParser.extractUrl(captured))
+    }
+
+    @Test
+    fun `captured android fixture yields zero urls`() {
+        val hits = fixtureLines("cf_stderr_2026-10-29.log")
+            .mapNotNull { TunnelUrlParser.extractUrl(it) }
+        assertEquals(emptyList<String>(), hits)
+    }
+
+    @Test
+    fun `reserved first labels are rejected`() {
+        for (label in listOf("api", "dash", "developers", "www", "cloudflare")) {
+            assertNull(
+                "reserved label '$label' must not parse as a quick Tunnel",
+                TunnelUrlParser.extractUrl("https://$label.trycloudflare.com/tunnel")
+            )
+        }
+    }
+
+    @Test
+    fun `hyphen-free label is rejected`() {
+        assertNull(TunnelUrlParser.extractUrl("https://abc.trycloudflare.com"))
+    }
+
+    @Test
+    fun `trailing junk after a real url is not part of the match`() {
+        val line = "D CloudflareTunnel: TunnelProcess: public URL: " +
+            "https://patch-cassette-golden-carb.trycloudflare.com\":"
+        assertEquals(
+            "https://patch-cassette-golden-carb.trycloudflare.com",
+            TunnelUrlParser.extractUrl(line)
+        )
+    }
+
+    @Test
+    fun `first valid url wins over an earlier reserved label`() {
+        val line = "Post \"https://api.trycloudflare.com/tunnel\": then " +
+            "https://patch-cassette-golden-carb.trycloudflare.com"
+        assertEquals(
+            "https://patch-cassette-golden-carb.trycloudflare.com",
+            TunnelUrlParser.extractUrl(line)
         )
     }
 }

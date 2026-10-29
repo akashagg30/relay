@@ -16,6 +16,7 @@ class SemanticProjectorTest {
         clickable: Boolean = false,
         editable: Boolean = false,
         scrollable: Boolean = false,
+        longClickable: Boolean = false,
         selected: Boolean = false,
         checked: Boolean = false,
         enabled: Boolean = true,
@@ -33,7 +34,7 @@ class SemanticProjectorTest {
             viewIdResourceName = viewId,
             boundsInScreen = RectData(left, top, right, bottom),
             clickable = clickable,
-            longClickable = false,
+            longClickable = longClickable,
             scrollable = scrollable,
             editable = editable,
             focusable = true,
@@ -247,21 +248,128 @@ class SemanticProjectorTest {
     }
 
     @Test
-    fun `label merged with value`() {
+    fun `adjacent text nodes are not merged away`() {
+        // R-15: 1.0.115 merged two consecutive VALUE nodes into one, keeping
+        // the first node's id and rect and demoting the second node's text to
+        // `value`. On Play Store results that is how row titles disappeared
+        // ("Sponsored" swallowed "Claude by Anthropic"). Both nodes must now
+        // survive as first-class elements with their own ids and rects.
         val root = makeNode(0, className = "android.widget.FrameLayout", children = listOf(
-            makeNode(1, text = "Battery"),
-            makeNode(2, text = "3%")
+            makeNode(1, text = "Sponsored", left = 0, top = 0, right = 200, bottom = 40),
+            makeNode(2, text = "Claude by Anthropic", left = 0, top = 50, right = 700, bottom = 120)
         ))
         val tree = makeTree(root)
         val scene = SemanticProjector.project(tree, 100L, 1920)
-        // After merge, should have fewer elements
-        assertTrue(scene.elements.size <= 2)
-        // If merged, the value should have the label as title
-        val values = scene.elements.filter { it.role == SemanticRole.VALUE }
-        if (values.isNotEmpty()) {
-            assertEquals("Battery", values[0].title)
-            assertEquals("3%", values[0].value)
-        }
+        assertEquals(2, scene.elements.size)
+        assertEquals("Sponsored", scene.elements[0].title)
+        assertEquals("Claude by Anthropic", scene.elements[1].title)
+        assertEquals("100:2", scene.elements[1].elementId)
+        assertEquals(50, scene.elements[1].bounds?.top)
+        assertEquals(120, scene.elements[1].bounds?.bottom)
+        assertTrue(scene.treeIncomplete.isEmpty())
+    }
+
+    @Test
+    fun `degenerate container keeps its subtree and reports the gap`() {
+        // R-15/R-5: a visible container with a 0x0 rect used to return null and
+        // take every child with it, which is how a whole Play/Wikipedia screen
+        // collapsed to one or two elements.
+        val root = makeNode(0, className = "android.widget.FrameLayout", children = listOf(
+            makeNode(1, className = "android.view.View", left = 0, top = 0, right = 0, bottom = 0,
+                children = listOf(
+                    makeNode(2, text = "For you", clickable = true),
+                    makeNode(3, text = "Top charts", clickable = true)
+                ))
+        ))
+        val tree = makeTree(root)
+        val scene = SemanticProjector.project(tree, 100L, 1920)
+        assertEquals(2, scene.elements.size)
+        assertEquals("For you", scene.elements[0].title)
+        assertEquals(1, scene.treeIncomplete.size)
+        assertEquals(TreeGap.DEGENERATE_BOUNDS, scene.treeIncomplete[0].reason)
+        assertEquals("100:1", scene.treeIncomplete[0].elementId)
+    }
+
+    @Test
+    fun `actionable node without identity is kept and reported`() {
+        val root = makeNode(0, className = "android.widget.FrameLayout", children = listOf(
+            makeNode(1, className = "android.widget.ImageButton", clickable = true)
+        ))
+        val tree = makeTree(root)
+        val scene = SemanticProjector.project(tree, 100L, 1920)
+        assertEquals(1, scene.elements.size)
+        assertEquals(SemanticRole.ACTION, scene.elements[0].role)
+        assertNotNull(scene.elements[0].bounds)
+        assertEquals(1, scene.treeIncomplete.size)
+        assertEquals(TreeGap.ACTIONABLE_WITHOUT_IDENTITY, scene.treeIncomplete[0].reason)
+    }
+
+    @Test
+    fun `clickable card keeps nested actionable children`() {
+        // A clickable card used to swallow its descendants entirely, so a
+        // nested Install button inside a result row was unreachable.
+        val root = makeNode(0, className = "android.widget.FrameLayout", children = listOf(
+            makeNode(1, className = "android.widget.LinearLayout", clickable = true,
+                left = 0, top = 0, right = 1000, bottom = 400,
+                children = listOf(
+                    makeNode(2, text = "Claude by Anthropic"),
+                    makeNode(3, text = "Install", clickable = true,
+                        left = 800, top = 100, right = 990, bottom = 200)
+                ))
+        ))
+        val tree = makeTree(root)
+        val scene = SemanticProjector.project(tree, 100L, 1920)
+        assertEquals(1, scene.elements.size)
+        val card = scene.elements[0]
+        assertEquals(SemanticRole.ACTION, card.role)
+        assertEquals("Claude by Anthropic", card.title)
+        assertEquals(2, card.children.size)
+        assertEquals("Claude by Anthropic", card.children[0].title)
+        assertEquals("Install", card.children[1].title)
+        assertEquals("100:3", card.children[1].elementId)
+    }
+
+    @Test
+    fun `viewId survives projection`() {
+        val root = makeNode(0, className = "android.widget.FrameLayout", children = listOf(
+            makeNode(1, text = "Wi-Fi", clickable = true, viewId = "com.android.settings:id/wifi_row")
+        ))
+        val tree = makeTree(root)
+        val scene = SemanticProjector.project(tree, 100L, 1920)
+        assertEquals("com.android.settings:id/wifi_row", scene.elements[0].viewId)
+    }
+
+    @Test
+    fun `longClickable row stays actionable`() {
+        val root = makeNode(0, className = "android.widget.FrameLayout", children = listOf(
+            makeNode(1, className = "android.widget.LinearLayout", longClickable = true,
+                left = 0, top = 0, right = 1000, bottom = 200,
+                children = listOf(
+                    makeNode(2, text = "Display", left = 80, top = 20, right = 600, bottom = 90)
+                ))
+        ))
+        val tree = makeTree(root)
+        val scene = SemanticProjector.project(tree, 100L, 1920)
+        // A long-pressable row is a target (context menu), not a decorative
+        // section: it must keep its own id and rect and carry the label.
+        assertEquals(1, scene.elements.size)
+        assertEquals(SemanticRole.ACTION, scene.elements[0].role)
+        assertEquals("Display", scene.elements[0].title)
+        assertEquals("100:1", scene.elements[0].elementId)
+        assertEquals("Display", scene.elements[0].children[0].title)
+    }
+
+    @Test
+    fun `label merged with titleless action records the absorbed id`() {
+        val root = makeNode(0, className = "android.widget.FrameLayout", children = listOf(
+            makeNode(1, desc = "Menu"),
+            makeNode(2, clickable = true, className = "android.widget.ImageButton")
+        ))
+        val tree = makeTree(root)
+        val scene = SemanticProjector.project(tree, 100L, 1920)
+        assertEquals(1, scene.elements.size)
+        assertEquals("Menu", scene.elements[0].title)
+        assertTrue(scene.elements[0].mergedFrom.contains("100:1"))
     }
 
     @Test

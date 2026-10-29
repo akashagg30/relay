@@ -19,12 +19,16 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
     tools.put(toolDef("observe",
         "Returns a semantic representation of the current screen. " +
         "Elements have roles (action, input, toggle, value, section, header, list, tab). " +
-        "Each element has an id for click_node and input_text. " +
+        "Each element has an id for click_node and input_text, pixel bounds, and a viewId " +
+        "when the Android view exposes one. " +
         "Top-level keys are always: app, screenTitle, scrollable, screenHash, elements, screenState. " +
-        "screenTitle is \"Unknown\" when no title candidate (TextView/Toolbar/ActionBar) " +
+        "One optional key, treeIncomplete, appears ONLY when the tree could not represent " +
+        "something: it lists {id, nodeId, reason, text?, className?} with reason " +
+        "degenerate_bounds, actionable_without_identity or focusable_without_identity. " +
+        "screenTitle is the sentinel Unknown when no title candidate (TextView/Toolbar/ActionBar) " +
         "was found within depth 10 of the window root; normal for full-screen apps/games. " +
         "IMPORTANT: Element IDs change between calls. Use them immediately after observe(). " +
-        "Don't cache IDs across multiple observe() calls.",
+        "Don't cache IDs across multiple observe() calls; cache viewId instead.",
         JSONObject()))
 
     tools.put(toolDef("click_node",
@@ -34,7 +38,7 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "Element IDs change between observe() calls, so don't cache them. " +
         "Returns screenChanged=true if the click navigated to a different app.",
         JSONObject().apply {
-            put("id", stringParam("Element id from observe (e.g. \"1:7\")"))
+            put("id", stringParam("Element id from observe (e.g. 1:7)"))
         }))
 
     tools.put(toolDef("swipe", "Swipe between two points", JSONObject().apply {
@@ -49,7 +53,7 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         "Sets text on an editable element returned by observe(). " +
         "Pass the element's `id` exactly as returned by observe().",
         JSONObject().apply {
-            put("id", stringParam("Element id from observe (e.g. \"1:7\")"))
+            put("id", stringParam("Element id from observe (e.g. 1:7)"))
             put("text", stringParam("Text to input"))
         }))
 
@@ -101,8 +105,12 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
         JSONObject()))
 
     tools.put(toolDef("find",
-        "Search the current screen for an element matching text and/or role. " +
-        "Returns the element if found, or found=false. " +
+        "Search the last observe() result for an element. " +
+        "Matches text, contentDescription, value, placeholder, viewId (Android resource id) " +
+        "and — when the query looks like an element id (e.g. 1:7) — the element id itself, " +
+        "across EVERY retained element, nested ones included. " +
+        "Exact title matches rank above substring matches; returns found, count, matches[] " +
+        "(id/role/title/viewId/bounds, up to 10) and the best element with its bounds. " +
         "Uses the last observe() result - call observe() first if the screen may have changed.",
         JSONObject().apply {
             put("text", stringParam("Text to search for (case-insensitive substring match)"))
@@ -121,7 +129,7 @@ internal fun McpHandler.buildToolsArray(): JSONArray {
     tools.put(toolDef("diag_sealed",
         "DIAGNOSTIC: Tests node sealed lifecycle. Walk tree, recycle all, re-walk, try performAction.",
         JSONObject().apply {
-            put("elementId", stringParam("Element id from get_screen_state (e.g. \\\"24:86\\\")"))
+            put("elementId", stringParam("Element id from get_screen_state (e.g. 24:86)"))
         }))
 
     tools.put(toolDef("get_audit_log",

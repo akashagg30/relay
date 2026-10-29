@@ -1,0 +1,43 @@
+{
+  "_provenance": {
+    "screen": "Google Play Store - search results for 'Claude'",
+    "captured_from": "get_screen_state (raw accessibility tree, flat nodes + parentId)",
+    "device": "Motorola Edge 70 Fusion, 1080x2400, Android API 37",
+    "reconstructed": true,
+    "note": "Structure reconstructed from the observe() output recorded in ~/projects/relay-bug-report-2026-10-26.md (2026-10-29 evening correction): observe returned only 'Sponsored', 'Install' x2, 'More options' in the y250-1600 band while the screenshot showed the row titles. The exact raw capture from Executive's get_screen_state run must replace this file verbatim when available; the shape below is the get_screen_state envelope, so a real capture can be dropped in without touching the harness."
+  },
+  "snapshotId": 1,
+  "packageName": "com.android.vending",
+  "screenWidth": 1080,
+  "screenHeight": 2400,
+  "nodes": [
+    {"id": "1:0", "className": "android.widget.FrameLayout", "bounds": [0, 0, 1080, 2400], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:1", "parentId": "1:0", "className": "android.widget.TextView", "text": "Google Play", "viewId": "com.android.vending:id/title", "bounds": [24, 90, 540, 170], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:2", "parentId": "1:0", "className": "android.widget.EditText", "text": "Claude", "contentDescription": "Search Google Play", "viewId": "com.android.vending:id/search_box", "bounds": [24, 210, 1056, 320], "clickable": true, "longClickable": true, "scrollable": false, "editable": true, "focusable": true, "focused": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:3", "parentId": "1:0", "className": "androidx.recyclerview.widget.RecyclerView", "viewId": "com.android.vending:id/results_list", "bounds": [0, 360, 1080, 2200], "clickable": false, "longClickable": false, "scrollable": true, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:4", "parentId": "1:3", "className": "android.widget.LinearLayout", "bounds": [0, 360, 1080, 780], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:5", "parentId": "1:4", "className": "android.widget.TextView", "text": "Sponsored", "bounds": [24, 380, 240, 430], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:6", "parentId": "1:4", "className": "android.widget.TextView", "text": "Claude by Anthropic", "viewId": "com.android.vending:id/card_title", "bounds": [24, 440, 760, 510], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:7", "parentId": "1:4", "className": "android.widget.TextView", "text": "Anthropic PBC \u00b7 In-app purchases", "bounds": [24, 520, 760, 580], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:8", "parentId": "1:4", "className": "android.widget.TextView", "text": "4.5 star", "bounds": [24, 590, 200, 640], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:9", "parentId": "1:4", "className": "android.widget.Button", "text": "Install", "viewId": "com.android.vending:id/install_button", "bounds": [860, 440, 1050, 560], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:10", "parentId": "1:4", "className": "android.widget.ImageButton", "contentDescription": "More options", "bounds": [880, 600, 1050, 700], "clickable": true, "longClickable": true, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:11", "parentId": "1:3", "className": "android.widget.LinearLayout", "bounds": [0, 800, 1080, 1220], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:12", "parentId": "1:11", "className": "android.widget.TextView", "text": "Sponsored", "bounds": [24, 820, 240, 870], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:13", "parentId": "1:11", "className": "android.widget.TextView", "text": "Kimi - Your AI Assistant", "bounds": [24, 880, 760, 950], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:14", "parentId": "1:11", "className": "android.widget.TextView", "text": "Moonshot AI", "bounds": [24, 960, 760, 1020], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:15", "parentId": "1:11", "className": "android.widget.TextView", "text": "4.2 star", "bounds": [24, 1030, 200, 1080], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:16", "parentId": "1:11", "className": "android.widget.Button", "text": "Install", "bounds": [860, 880, 1050, 1000], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:17", "parentId": "1:11", "className": "android.widget.ImageButton", "contentDescription": "More options", "bounds": [880, 1040, 1050, 1140], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:18", "parentId": "1:0", "className": "android.widget.LinearLayout", "viewId": "com.android.vending:id/bottom_nav", "bounds": [0, 2260, 1080, 2400], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:19", "parentId": "1:18", "className": "android.widget.TextView", "text": "Games", "bounds": [0, 2300, 270, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:20", "parentId": "1:18", "className": "android.widget.TextView", "text": "Apps", "bounds": [270, 2300, 540, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:21", "parentId": "1:18", "className": "android.widget.TextView", "text": "Search", "bounds": [540, 2300, 810, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "selected": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:22", "parentId": "1:18", "className": "android.widget.TextView", "text": "Books", "bounds": [810, 2300, 1080, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true}
+  ]
+}

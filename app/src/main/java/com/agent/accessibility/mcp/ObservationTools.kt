@@ -36,6 +36,15 @@ data class ScreenState(
  *   app, screenTitle, scrollable, screenHash, elements,
  *   screenState { state, keyboardVisible, dialogVisible }
  *
+ * plus ONE optional key, `treeIncomplete`, present only when the projection
+ * had to leave something out (R-15). It is a typed list of
+ * `{id, nodeId, reason, text?, className?}` entries with reason one of
+ * `degenerate_bounds` (the node has no usable rect, so it cannot be tapped),
+ * `actionable_without_identity` (clickable/scrollable/editable/longClickable
+ * but the raw tree gives it no text, description or viewId) or
+ * `focusable_without_identity`. When the list is empty the key is absent, so
+ * a complete tree keeps the exact 1.0.113 contract.
+ *
  * `screenTitle` is always a string. "Unknown" means no title candidate
  * (TextView/Toolbar/ActionBar) was found within depth 10 of the window
  * root; it is normal for full-screen apps/games.
@@ -53,6 +62,11 @@ fun observeEnvelope(scene: SemanticScene, state: ScreenState): JSONObject {
             put("keyboardVisible", state.keyboardVisible)
             put("dialogVisible", state.dialogVisible)
         })
+        if (scene.treeIncomplete.isNotEmpty()) {
+            put("treeIncomplete", JSONArray().apply {
+                for (gap in scene.treeIncomplete) put(gap.toJson())
+            })
+        }
     }
 }
 
@@ -196,20 +210,23 @@ private fun McpHandler.flattenForJson(
     array: JSONArray,
     snapshotId: Long
 ) {
-    // Skip invisible non-actionable containers
-    if (node.text == null && node.contentDescription == null && !node.clickable &&
-        !node.scrollable && !node.editable && node.viewIdResourceName == null
-    ) {
-        // But if this container has semantic enrichment (clickable with title/summary), emit it
-        val isClickableEmptyContainer = node.clickable &&
-            node.text == null && node.contentDescription == null && node.viewIdResourceName == null
-
-        if (!isClickableEmptyContainer) {
-            for (child in node.children) {
-                flattenForJson(child, parentId, array, snapshotId)
-            }
-            return
+    // R-15: the raw dump is the evidence path for tree completeness, so it
+    // must not pre-filter the nodes the projection is being judged on. Keep a
+    // node when it has any identity (text/description/viewId) OR is
+    // actionable — clickable, scrollable, editable, longClickable — OR is a
+    // focusable leaf (a nameless control: focusable alone is a container
+    // property on nearly every view, so it only counts when there is nothing
+    // beneath it). Skipped containers still recurse, so their children are
+    // never lost.
+    val hasIdentity = node.text != null || node.contentDescription != null ||
+        node.viewIdResourceName != null
+    val actionable = node.clickable || node.scrollable || node.editable ||
+        node.longClickable || (node.focusable && node.children.isEmpty())
+    if (!hasIdentity && !actionable) {
+        for (child in node.children) {
+            flattenForJson(child, parentId, array, snapshotId)
         }
+        return
     }
 
     val elementId = ElementId(snapshotId, node.nodeId).encode()
@@ -365,26 +382,54 @@ internal fun McpHandler.observeInternal(service: AgentAccessibilityService): Sem
     return SemanticProjector.project(tree, snapshotId, metrics.heightPixels, metrics.widthPixels)
 }
 
+/**
+ * R-15: `find` searches EVERY field a retained element carries, not just
+ * `title`/`summary`.
+ *
+ * The 1.0.115 matcher only looked at title/summary, which is how the Play
+ * Store row titles stayed invisible: a merge demoted them into `value`, and
+ * `find` never looked there. Fields searched now: title, summary, value,
+ * placeholder, viewId (Android resource id) and — when the query looks like
+ * one — the element id itself.
+ *
+ * Results are ranked so an exact title match beats a substring match on some
+ * other field, and the ranking is stable (traversal order breaks ties).
+ */
+internal fun scoreElement(el: SemanticElement, text: String, role: String): Int {
+    if (role.isNotEmpty() && el.role.value != role) return -1
+    if (text.isEmpty()) return 0
+    var score = 0
+    val t = text.trim()
+    if (el.title?.equals(t, ignoreCase = true) == true) score = score.coerceAtLeast(100)
+    if (el.viewId?.endsWith("/$t") == true || el.viewId?.endsWith(":id/$t") == true) {
+        score = score.coerceAtLeast(90)
+    }
+    if (el.viewId?.contains(t, ignoreCase = true) == true) score = score.coerceAtLeast(60)
+    if (el.title?.contains(t, ignoreCase = true) == true) score = score.coerceAtLeast(50)
+    if (el.summary?.contains(t, ignoreCase = true) == true) score = score.coerceAtLeast(40)
+    if (el.value?.contains(t, ignoreCase = true) == true) score = score.coerceAtLeast(30)
+    if (el.placeholder?.contains(t, ignoreCase = true) == true) score = score.coerceAtLeast(20)
+    if (t.contains(':') && el.elementId == t) score = score.coerceAtLeast(80)
+    return if (score > 0) score else -1
+}
+
 private fun searchElement(
     elements: List<SemanticElement>,
     text: String,
     role: String,
     results: MutableList<SemanticElement>
 ) {
-    for (el in elements) {
-        val textMatch = text.isEmpty() ||
-            (el.title?.contains(text, ignoreCase = true) == true) ||
-            (el.summary?.contains(text, ignoreCase = true) == true)
-        val roleMatch = role.isEmpty() || el.role.value == role
-
-        if (textMatch && roleMatch) {
-            results.add(el)
-        }
-
-        if (el.children.isNotEmpty()) {
-            searchElement(el.children, text, role, results)
+    val scored = mutableListOf<Pair<SemanticElement, Int>>()
+    fun walk(list: List<SemanticElement>) {
+        for (el in list) {
+            val score = scoreElement(el, text, role)
+            if (score >= 0) scored.add(el to score)
+            if (el.children.isNotEmpty()) walk(el.children)
         }
     }
+    walk(elements)
+    // Stable sort by score desc: equal scores keep traversal order.
+    scored.sortedByDescending { it.second }.forEach { results.add(it.first) }
 }
 
 internal fun McpHandler.find(id: String, args: JSONObject): String {
@@ -400,13 +445,28 @@ internal fun McpHandler.find(id: String, args: JSONObject): String {
     if (results.isEmpty()) {
         return toolSuccessResponse(id, JSONObject().apply {
             put("found", false)
+            put("count", 0)
+            put("matches", JSONArray())
         }.toString())
+    }
+
+    val matches = JSONArray()
+    for (el in results.take(10)) {
+        matches.put(JSONObject().apply {
+            put("id", el.elementId)
+            put("role", el.role.value)
+            if (el.title != null) put("title", el.title)
+            if (el.viewId != null) put("viewId", el.viewId)
+            if (el.bounds != null) put("bounds", el.bounds.toJson())
+        })
     }
 
     val best = results[0]
     return toolSuccessResponse(id, JSONObject().apply {
         put("found", true)
+        put("count", results.size)
         put("element", best.toJson())
+        put("matches", matches)
     }.toString())
 }
 

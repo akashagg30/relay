@@ -10,11 +10,42 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
+/**
+ * A raw-tree node the projection could not represent faithfully (R-15).
+ *
+ * Surfaced to callers as `treeIncomplete` so a gap is never silent: either the
+ * raw accessibility tree itself lacked the information (no rect, merged
+ * semantics) or the node was actionable but exposed no text/description/viewId
+ * to name it with.
+ */
+data class TreeGap(
+    val elementId: String?,
+    val nodeId: Int,
+    val reason: String,
+    val text: String? = null,
+    val className: String? = null
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        if (elementId != null) put("id", elementId)
+        put("nodeId", nodeId)
+        put("reason", reason)
+        if (!text.isNullOrBlank()) put("text", text)
+        if (!className.isNullOrBlank()) put("className", className)
+    }
+
+    companion object {
+        const val DEGENERATE_BOUNDS = "degenerate_bounds"
+        const val ACTIONABLE_WITHOUT_IDENTITY = "actionable_without_identity"
+        const val FOCUSABLE_WITHOUT_IDENTITY = "focusable_without_identity"
+    }
+}
+
 data class SemanticScene(
     val app: String?,
     val screenTitle: String?,
     val scrollable: Boolean,
-    val elements: List<SemanticElement>
+    val elements: List<SemanticElement>,
+    val treeIncomplete: List<TreeGap> = emptyList()
 ) {
     fun toJson(): String {
         val json = JSONObject()
@@ -83,6 +114,19 @@ data class SemanticScene(
         }
         return count
     }
+
+    /** Every element in the scene, depth-first, including nested children. */
+    fun flatten(): List<SemanticElement> {
+        val out = mutableListOf<SemanticElement>()
+        fun walk(list: List<SemanticElement>) {
+            for (el in list) {
+                out.add(el)
+                walk(el.children)
+            }
+        }
+        walk(elements)
+        return out
+    }
 }
 
 private fun sha256(input: String): String {
@@ -105,6 +149,21 @@ data class SemanticElement(
     val scrollable: Boolean = false,
     val presentation: PresentationState = PresentationState.VISIBLE,
     val bounds: BoundsHint? = null,
+    /**
+     * Android resource id (`viewIdResourceName`) of the source node, e.g.
+     * `com.android.vending:id/title`. Stable across snapshots, unlike the
+     * per-snapshot element id, so it is the best long-lived handle a caller
+     * has. R-15: emitted whenever the source node has one.
+     */
+    val viewId: String? = null,
+    /**
+     * Element ids of raw nodes folded into this one (a label supplying a
+     * button's title, a text child folded into a summary). R-15: the
+     * projection never drops a node without recording its id here, so
+     * "retained ids ∪ mergedFrom" covers everything the projection decided
+     * to represent.
+     */
+    val mergedFrom: List<String> = emptyList(),
     val children: List<SemanticElement> = emptyList()
 ) {
     fun toJson(): JSONObject {
@@ -115,6 +174,7 @@ data class SemanticElement(
         if (summary != null) json.put("summary", summary)
         if (value != null) json.put("value", value)
         if (placeholder != null) json.put("placeholder", placeholder)
+        if (viewId != null) json.put("viewId", viewId)
         if (!enabled) json.put("enabled", false)
         if (checked != null) json.put("checked", checked)
         if (selected != null) json.put("selected", selected)
@@ -122,6 +182,11 @@ data class SemanticElement(
         if (scrollable) json.put("scrollable", true)
         if (presentation != PresentationState.VISIBLE) json.put("presentation", presentation.value)
         if (bounds != null) json.put("bounds", bounds.toJson())
+        if (mergedFrom.isNotEmpty()) {
+            val arr = JSONArray()
+            for (id in mergedFrom) arr.put(id)
+            json.put("mergedFrom", arr)
+        }
         if (children.isNotEmpty()) {
             val arr = JSONArray()
             for (child in children) {

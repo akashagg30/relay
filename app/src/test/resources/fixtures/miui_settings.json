@@ -1,0 +1,40 @@
+{
+  "_provenance": {
+    "screen": "MIUI/HyperOS Settings - Wi-Fi + display rows",
+    "captured_from": "get_screen_state (raw accessibility tree, flat nodes + parentId)",
+    "device": "Motorola Edge 70 Fusion (MIUI Settings port), 1080x2400, Android API 37",
+    "reconstructed": true,
+    "note": "Settings-style screen: clickable rows with text, switches with checked state, long-clickable rows (context menu), a disabled row, and a row whose label lives in a child TextView only (the classic 'action with summary from child text' shape). This is the screen where click_node already worked; the harness pins that it stays complete."
+  },
+  "snapshotId": 1,
+  "packageName": "com.android.settings",
+  "screenWidth": 1080,
+  "screenHeight": 2400,
+  "nodes": [
+    {"id": "1:0", "className": "android.widget.FrameLayout", "bounds": [0, 0, 1080, 2400], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:1", "parentId": "1:0", "className": "android.widget.TextView", "text": "Settings", "bounds": [48, 120, 500, 200], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:2", "parentId": "1:0", "className": "android.widget.EditText", "text": "", "contentDescription": "Search settings", "viewId": "com.android.settings:id/search_bar", "bounds": [24, 220, 1056, 330], "clickable": true, "longClickable": false, "scrollable": false, "editable": true, "focusable": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:3", "parentId": "1:0", "className": "androidx.recyclerview.widget.RecyclerView", "viewId": "com.android.settings:id/settings_list", "bounds": [0, 340, 1080, 2400], "clickable": false, "longClickable": false, "scrollable": true, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:4", "parentId": "1:3", "className": "android.widget.LinearLayout", "bounds": [0, 340, 1080, 500], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:5", "parentId": "1:4", "className": "android.widget.TextView", "text": "Wi-Fi", "bounds": [80, 370, 600, 440], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:6", "parentId": "1:4", "className": "android.widget.TextView", "text": "Airtel_ajit_0749 Connected", "bounds": [80, 440, 800, 490], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:7", "parentId": "1:3", "className": "android.widget.LinearLayout", "bounds": [0, 500, 1080, 660], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:8", "parentId": "1:7", "className": "android.widget.TextView", "text": "Bluetooth", "bounds": [80, 530, 600, 600], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:9", "parentId": "1:7", "className": "android.widget.Switch", "text": "Bluetooth", "viewId": "com.android.settings:id/switch_widget", "bounds": [860, 540, 1020, 630], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "checked": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:10", "parentId": "1:3", "className": "android.widget.LinearLayout", "bounds": [0, 660, 1080, 820], "clickable": false, "longClickable": true, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:11", "parentId": "1:10", "className": "android.widget.TextView", "text": "Display", "bounds": [80, 690, 600, 760], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:12", "parentId": "1:10", "className": "android.widget.TextView", "text": "Dark theme, brightness", "bounds": [80, 760, 800, 810], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:13", "parentId": "1:3", "className": "android.widget.LinearLayout", "bounds": [0, 820, 1080, 980], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": false, "visibleToUser": true},
+    {"id": "1:14", "parentId": "1:13", "className": "android.widget.TextView", "text": "Sound & vibration", "bounds": [80, 850, 700, 920], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:15", "parentId": "1:3", "className": "android.widget.LinearLayout", "bounds": [0, 980, 1080, 1140], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:16", "parentId": "1:15", "className": "android.widget.TextView", "text": "About phone", "bounds": [80, 1010, 700, 1080], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true}
+  ]
+}

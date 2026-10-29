@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.116] - 2026-10-30
+
+**Tree completeness — the accessibility tree must give ALL the info (vision-free operation).**
+
+`observe`/`find` used to lose information that was present in the raw accessibility
+tree, which forced callers to fall back to screenshots and vision. On Play Store
+search results, row titles ("Claude by Anthropic") never appeared in `observe`
+while a screenshot showed them plainly.
+
+### Fixed
+- **No node merging across elements.** The projector merged consecutive text nodes
+  into one element (`mergeConsecutiveLabels`), keeping the first node's id and rect
+  and demoting the second node's text to a `value` field. On Play results the
+  "Sponsored" chip swallowed the row title, so the title was invisible to `observe`
+  and unfindable by `find`. Distinct nodes now stay distinct, each with its own id
+  and rect.
+- **A container with no usable rect no longer erases its subtree.** A visible node
+  reporting a 0x0 rect returned `null` and took every descendant with it; that is
+  how Play home and Wikipedia collapsed to one or two elements (R-5). The subtree is
+  projected and the container is reported in `treeIncomplete`.
+- **Controls no longer swallow their children.** `click_node` targets (actions,
+  toggles, tabs, inputs, players) dropped all descendants, so a nested "Install"
+  button inside a clickable result card was unreachable. Every element keeps its
+  children.
+- **`find` searches every field**, not just title/summary: text, contentDescription,
+  value, placeholder, viewId and element id, across all retained elements including
+  nested ones. Exact title matches rank first. Response gains `count` and `matches[]`.
+- **`longClickable` rows stay actionable** instead of degrading to a nameless section.
+
+### Added
+- Every element now carries `viewId` (the Android resource id) when the view exposes
+  one — a handle that survives snapshot churn, unlike the per-snapshot element id.
+- `treeIncomplete` — an optional top-level key in the `observe` envelope, present only
+  when the projection had to leave something out: `{id, nodeId, reason, text?,
+  className?}` with reason `degenerate_bounds`, `actionable_without_identity` or
+  `focusable_without_identity` (bounded to 40 entries). A complete tree keeps the
+  exact 1.0.113 key set.
+- `mergedFrom` on elements that absorbed another node (label → icon button), so a
+  merge is never silent.
+- **Raw-vs-projection diff harness** (`TreeCompletenessTest`) over committed raw
+  `get_screen_state` fixtures for Play results, Play home, Wikipedia article and MIUI
+  Settings: it fails if an actionable node is dropped, if a visible text is not
+  findable, if a retained visible element has no pixel rect, or if a viewId is lost.
+- `get_screen_state` no longer pre-filters longClickable / focusable-leaf nodes out of
+  the raw dump it is judged on.
+
 ## [Unreleased]
 
 ### Changed

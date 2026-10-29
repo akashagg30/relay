@@ -116,8 +116,9 @@ class ObserveEnvelopeTest {
 
     @Test
     fun `sparse path produces the same key set as the normal path`() {
-        // Degenerate bounds: strict projection drops this node (visible but
-        // insane bounds), so the strict scene is empty while raw nodes exist.
+        // Degenerate bounds: the strict projection cannot place this node
+        // (visible, 0x0 rect), so it reports it in treeIncomplete instead of
+        // silently dropping it (R-15) and the strict scene has no elements.
         val root = makeNode(
             0,
             className = "android.widget.FrameLayout",
@@ -132,16 +133,20 @@ class ObserveEnvelopeTest {
         val tree = makeTree(root)
         val strict = SemanticProjector.project(tree, 7L, 1920)
         assertEquals(0, strict.totalDescendantCount())
+        assertEquals(1, strict.treeIncomplete.size)
+        assertEquals(TreeGap.DEGENERATE_BOUNDS, strict.treeIncomplete[0].reason)
 
         val sparse = SemanticProjector.projectSparse(tree, 7L, 1920)
         assertTrue("sparse scene must be non-empty", sparse.elements.isNotEmpty())
 
-        val normalKeys = keySet(observeEnvelope(strict, ScreenState("stable", false, false)))
-        val sparseKeys = keySet(observeEnvelope(sparse, ScreenState("stable", false, true)))
-        assertEquals(canonicalKeys, normalKeys)
-        assertEquals(normalKeys, sparseKeys)
+        val normalJson = observeEnvelope(strict, ScreenState("stable", false, false))
         val sparseJson = observeEnvelope(sparse, ScreenState("stable", false, true))
+        // A complete tree keeps the exact 1.0.113 keys; an incomplete one adds
+        // exactly one typed key and nothing else.
+        assertEquals(canonicalKeys, keySet(sparseJson))
+        assertEquals(canonicalKeys + "treeIncomplete", keySet(normalJson))
         for (legacy in legacyKeys) {
+            assertFalse("legacy key $legacy must never appear", normalJson.has(legacy))
             assertFalse("legacy key $legacy must never appear", sparseJson.has(legacy))
         }
         assertTrue(sparseJson.getJSONArray("elements").length() > 0)

@@ -142,8 +142,8 @@ Response:
 | `search_apps` | `query` | Searches installed applications by name |
 | `open_app` | `name` | Opens an installed application by human-readable name (returns `ambiguous_app` instead of guessing) |
 | `current_app` | — | Returns the currently foreground application |
-| `observe` | — | Returns a semantic representation of the current screen (roles, ids) for cleaner reasoning. Top-level keys are always `app`, `screenTitle`, `scrollable`, `screenHash`, `elements`, `screenState`. `screenTitle` is `"Unknown"` when no title candidate (TextView/Toolbar/ActionBar) was found within depth 10 of the window root; normal for full-screen apps/games |
-| `find` | `text`, `role` | Searches the last `observe()` result for a matching element |
+| `observe` | — | Returns a semantic representation of the current screen (roles, ids, pixel bounds, `viewId`). Top-level keys are always `app`, `screenTitle`, `scrollable`, `screenHash`, `elements`, `screenState`. One optional key, `treeIncomplete`, appears **only** when the tree could not represent something (a node with no usable rect, or an actionable node with no text/description/viewId) — so a gap is never silent. `screenTitle` is `"Unknown"` when no title candidate (TextView/Toolbar/ActionBar) was found within depth 10 of the window root; normal for full-screen apps/games |
+| `find` | `text`, `role` | Searches the last `observe()` result for a matching element. Matches text, contentDescription, value, placeholder, `viewId` and element id across every retained element, nested ones included; exact title matches rank first. Returns `found`, `count`, `matches[]` (id/role/title/viewId/bounds, up to 10) and the best `element` |
 | `scroll_until` | `text`, `direction`, `maxScrolls` | Scrolls until an element with matching text is visible |
 | `diag_sealed` | `elementId` | Diagnostic: tests node sealed lifecycle (development aid) |
 | `act_toward_goal` | `goal`, `maxSteps`, `confidenceThreshold`, `pauseBeforeKeywords` | Bounded on-device perceive-decide-act loop; returns one of `done\|escalate\|paused\|stuck\|blocked\|max_steps` (`escalate` includes fresh element IDs ready for immediate use) |

@@ -1,0 +1,38 @@
+{
+  "_provenance": {
+    "screen": "Google Play Store - home (R-5 family: near-empty observe)",
+    "captured_from": "get_screen_state (raw accessibility tree, flat nodes + parentId)",
+    "device": "Motorola Edge 70 Fusion, 1080x2400, Android API 37",
+    "reconstructed": true,
+    "note": "Encodes the R-5 shape: a visible Compose host view reports a 0x0 rect while its whole subtree (tabs, feed rows, bottom nav) carries real bounds and text. 1.0.115 dropped the host AND its entire subtree, which is why observe came back with one or two elements on this screen. Replace with Executive's raw capture when available."
+  },
+  "snapshotId": 1,
+  "packageName": "com.android.vending",
+  "screenWidth": 1080,
+  "screenHeight": 2400,
+  "nodes": [
+    {"id": "1:0", "className": "android.widget.FrameLayout", "bounds": [0, 0, 1080, 2400], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:1", "parentId": "1:0", "className": "androidx.coordinatorlayout.widget.CoordinatorLayout", "viewId": "com.android.vending:id/home_root", "bounds": [0, 0, 1080, 2400], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:2", "parentId": "1:1", "className": "android.view.View", "bounds": [0, 0, 0, 0], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:3", "parentId": "1:2", "className": "android.widget.TextView", "text": "For you", "bounds": [24, 300, 260, 380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "selected": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:4", "parentId": "1:2", "className": "android.widget.TextView", "text": "Top charts", "bounds": [280, 300, 540, 380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:5", "parentId": "1:2", "className": "android.widget.TextView", "text": "New & updated", "bounds": [560, 300, 900, 380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:6", "parentId": "1:2", "className": "androidx.recyclerview.widget.RecyclerView", "viewId": "com.android.vending:id/feed_list", "bounds": [0, 400, 1080, 2200], "clickable": false, "longClickable": false, "scrollable": true, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:7", "parentId": "1:6", "className": "android.widget.LinearLayout", "bounds": [0, 400, 1080, 900], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:8", "parentId": "1:7", "className": "android.widget.TextView", "text": "Featured app", "bounds": [24, 420, 700, 490], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:9", "parentId": "1:7", "className": "android.widget.TextView", "text": "Editors' choice", "bounds": [24, 500, 700, 560], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:10", "parentId": "1:7", "className": "android.widget.ImageButton", "bounds": [900, 430, 1050, 580], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:11", "parentId": "1:7", "className": "android.view.View", "bounds": [700, 600, 900, 700], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+
+    {"id": "1:12", "parentId": "1:2", "className": "android.widget.LinearLayout", "viewId": "com.android.vending:id/bottom_nav", "bounds": [0, 2260, 1080, 2400], "clickable": false, "longClickable": false, "scrollable": false, "editable": false, "focusable": false, "enabled": true, "visibleToUser": true},
+    {"id": "1:13", "parentId": "1:12", "className": "android.widget.TextView", "text": "Games", "bounds": [0, 2300, 216, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:14", "parentId": "1:12", "className": "android.widget.TextView", "text": "Apps", "bounds": [216, 2300, 432, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:15", "parentId": "1:12", "className": "android.widget.TextView", "text": "Search", "bounds": [432, 2300, 648, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:16", "parentId": "1:12", "className": "android.widget.TextView", "text": "Books", "bounds": [648, 2300, 864, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true},
+    {"id": "1:17", "parentId": "1:12", "className": "android.widget.TextView", "text": "Kids", "bounds": [864, 2300, 1080, 2380], "clickable": true, "longClickable": false, "scrollable": false, "editable": false, "focusable": true, "enabled": true, "visibleToUser": true}
+  ]
+}

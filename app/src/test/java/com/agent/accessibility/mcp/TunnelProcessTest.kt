@@ -415,7 +415,15 @@ class TunnelProcessTest {
             h.stderrWrite.flush()
             assertTrue(
                 "buffer full",
-                awaitCondition(10_000) { h.tunnel.bufferedLines.size == 50 }
+                // Wait for the TRUE end state. `size == 50` alone is racy: the
+                // two pumps fill concurrently and the total can transiently hit
+                // 50 before both streams have drained their last line.
+                awaitCondition(10_000) {
+                    val lines = h.tunnel.bufferedLines
+                    lines.size == 50 &&
+                        lines.any { it.endsWith("stdout line 40") } &&
+                        lines.any { it.endsWith("stderr line 40") }
+                }
             )
             val lines = h.tunnel.bufferedLines
             assertEquals(50, lines.size)

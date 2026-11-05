@@ -51,6 +51,7 @@ class McpServerService : Service() {
 
     private var serverSocket: ServerSocket? = null
     private var serverThread: Thread? = null
+    private var serverStartedAtMs = 0L
     private lateinit var authManager: AuthManager
     private lateinit var mcpHandler: McpHandler
     private lateinit var rateLimiter: RateLimiter
@@ -175,6 +176,7 @@ class McpServerService : Service() {
             }
 
             isRunning = true
+            serverStartedAtMs = System.currentTimeMillis()
             mcpHandler.init()
             startForegroundWithNotification()
             Log.d(TAG, "MCP Server started on port $port")
@@ -188,6 +190,7 @@ class McpServerService : Service() {
         // Stop tunnel if running (it depends on the MCP server)
         stopTunnel()
         isRunning = false
+        serverStartedAtMs = 0L
         serverThread?.interrupt()
         serverThread = null
         try {
@@ -248,45 +251,57 @@ class McpServerService : Service() {
                 String(bytes, 0, off, Charsets.UTF_8)
             } else ""
 
-            // Security checks for MCP endpoints
-            if (path == "/mcp" && method == "POST") {
-                // Rate limiting check
-                if (!rateLimiter.isAllowed(clientIp)) {
-                    val response = rateLimitResponse()
-                    auditLogger.logRequest(clientIp, "rate_limited", "POST /mcp", 429)
+            val accept = headers["accept"] ?: ""
+            val authorization = headers["authorization"]
+            val authenticated = authManager.validate(authorization)
+
+            // Rate limit first: it protects the device from a caller that has
+            // no valid token yet, so it must not sit behind auth.
+            if (path == "/mcp" && method == "POST" && !rateLimiter.isAllowed(clientIp)) {
+                val response = rateLimitResponse()
+                auditLogger.logRequest(clientIp, "rate_limited", "$method $path", response.first)
+                sendHttpResponse(output, response.first, response.second)
+                return
+            }
+
+            // R-11: ONE auth rule for the whole /mcp route family. GET /mcp
+            // used to answer unauthenticated while POST /mcp required the
+            // token; both now require it.
+            if (authRequirementFor(method, path) == AuthRequirement.REQUIRED && !authenticated) {
+                auditLogger.logRequest(clientIp, "rejected", "$method $path", 401)
+                sendHttpResponse(output, 401, UNAUTHORIZED_BODY)
+                return
+            }
+
+            // Consent is only meaningful once the caller proved it holds the token.
+            if (path == "/mcp" && method == "POST" && !isClientApproved(clientIp)) {
+                // Auto-approve local network clients (safe: on same machine or LAN)
+                if (isLocalNetworkClient(clientIp)) {
+                    approveClient(clientIp)
+                    showInfoNotification(clientIp, true)
+                    Log.d(TAG, "Auto-approved local network client: $clientIp")
+                } else {
+                    showConsentPrompt(clientIp)
+                    val response = consentRequiredResponse()
+                    auditLogger.logRequest(clientIp, "consent_required", "$method $path", response.first)
                     sendHttpResponse(output, response.first, response.second)
                     return
                 }
-
-                // Consent check for new clients
-                if (!isClientApproved(clientIp)) {
-                    // Auto-approve local network clients (safe: on same machine or LAN)
-                    if (isLocalNetworkClient(clientIp)) {
-                        approveClient(clientIp)
-                        showInfoNotification(clientIp, true)
-                        Log.d(TAG, "Auto-approved local network client: $clientIp")
-                    } else {
-                        showConsentPrompt(clientIp)
-                        val response = consentRequiredResponse()
-                        auditLogger.logRequest(clientIp, "consent_required", "POST /mcp", 403)
-                        sendHttpResponse(output, response.first, response.second)
-                        return
-                    }
-                }
             }
 
-            val accept = headers["accept"] ?: ""
             val response = when {
                 method == "GET" && path == "/health" -> handleHealth()
+                method == "GET" && path == "/mcp/status" -> handleStatus(authorization)
                 method == "GET" && path == "/mcp" -> handleSseGet()
-                method == "POST" && path == "/mcp" -> handleMcp(headers["authorization"], body, accept, clientIp)
+                method == "POST" && path == "/mcp" -> handleMcp(authorization, body, accept, clientIp)
                 else -> notFound()
             }
 
-            // Log the request
-            val authStatus = if (path == "/mcp" && method == "POST") {
-                if (authManager.validate(headers["authorization"])) "accepted" else "rejected"
-            } else "n/a"
+            // Log the request, with the auth verdict for the whole /mcp family.
+            val authStatus = when (authRequirementFor(method, path)) {
+                AuthRequirement.REQUIRED -> if (authenticated) "accepted" else "rejected"
+                AuthRequirement.PUBLIC -> "n/a"
+            }
             auditLogger.logRequest(clientIp, authStatus, "$method $path", response.first)
 
             if (response.third) {
@@ -318,14 +333,51 @@ class McpServerService : Service() {
 
         val health = JSONObject().apply {
             put("status", "ok")
+            put("version", com.agent.accessibility.BuildConfig.APP_VERSION)
             put("accessibility", accessibilityEnabled)
             put("accessibilityRunning", accessibilityRunning)
             put("foregroundPackage", foregroundPackage ?: "unknown")
             put("mcpServer", isRunning)
             put("observeFallbackCount", mcpHandler.observeFallbackCount)
             put("port", port)
+            put("statusEndpoint", "/mcp/status")
         }
         return Triple(200, health.toString(), false)
+    }
+
+    /**
+     * GET /mcp/status — the diagnostic that makes an outage a 10-second read.
+     *
+     * Public on purpose: a client that is failing auth must be able to learn
+     * WHY (token rotated vs rate limited vs accessibility down) instead of
+     * guessing from a bare 401. The body carries a token FINGERPRINT, never
+     * the token.
+     */
+    private fun handleStatus(authorization: String?): Triple<Int, String, Boolean> {
+        val authenticated = authManager.validate(authorization)
+        val snapshot = ServerStatusSnapshot(
+            version = com.agent.accessibility.BuildConfig.APP_VERSION,
+            uptimeMs = if (serverStartedAtMs > 0L) {
+                System.currentTimeMillis() - serverStartedAtMs
+            } else {
+                0L
+            },
+            port = port,
+            serverRunning = isRunning,
+            accessibilityEnabled = isAccessibilityEnabled(),
+            accessibilityRunning = isAccessibilityServiceRunning(),
+            tokenProvided = !authorization.isNullOrBlank(),
+            authenticated = authenticated,
+            tokenFingerprint = authManager.fingerprint(),
+            tokenRotationCount = authManager.rotationCount,
+            tokenRotatedAtMs = authManager.lastRotatedAtMs,
+            rateLimitPerSecond = rateLimiter.limitPerSecond,
+            rateLimitedClients = rateLimiter.blockedClientCount(),
+            approvedClients = getApprovedClients().size,
+            tunnelRunning = cloudflareTunnel?.isRunning == true,
+            tunnelUrl = getTunnelUrl()
+        )
+        return Triple(200, buildStatusJson(snapshot), false)
     }
 
     private fun handleSseGet(): Triple<Int, String, Boolean> {

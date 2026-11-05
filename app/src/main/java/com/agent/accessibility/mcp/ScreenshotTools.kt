@@ -84,6 +84,23 @@ internal fun screenshotFailedEnvelope(attempts: Int, methods: List<String>, elap
         "\"methods\":$methodsJson,\"elapsedMs\":$elapsedMs,\"retryable\":true}}"
 }
 
+/**
+ * Success payload for take_screenshot. Pure so the tool's wire shape can be
+ * asserted on the JVM — the only bitmap step left is the base64 encoder the
+ * caller passes in.
+ */
+internal fun screenshotSuccessPayload(
+    width: Int,
+    height: Int,
+    imageBase64: String,
+    format: String = "png"
+): JSONObject = JSONObject().apply {
+    put("image", imageBase64)
+    put("width", width)
+    put("height", height)
+    put("format", format)
+}
+
 internal fun McpHandler.defaultScreenshotBackend(service: AgentAccessibilityService): ScreenshotBackend {
     var method: String? = null
     return object : ScreenshotBackend {
@@ -186,12 +203,7 @@ internal data class ScreenshotResult(
     val width: Int,
     val height: Int
 ) {
-    val json: JSONObject get() = JSONObject().apply {
-        put("image", encodeBitmapToBase64(bitmap))
-        put("width", width)
-        put("height", height)
-        put("format", "png")
-    }
+    val json: JSONObject get() = screenshotSuccessPayload(width, height, encodeBitmapToBase64(bitmap))
 }
 
 /**

@@ -12,8 +12,14 @@ import org.json.JSONObject
 /**
  * Tool registry: builds the `tools/list` payload advertised over MCP.
  * One entry per supported tool, with JSON-Schema-style input definitions.
+ *
+ * Top-level on purpose: the payload is pure (org.json only, no Android
+ * state), so JVM unit tests build the real advertised list instead of a
+ * hand-maintained copy. That is the drift guard — README, tools/list and
+ * [HANDLED_TOOL_NAMES] are checked against each other in
+ * ToolRegistryContractTest.
  */
-internal fun McpHandler.buildToolsArray(): JSONArray {
+internal fun buildToolsArray(): JSONArray {
     val tools = JSONArray()
 
     tools.put(toolDef("observe",

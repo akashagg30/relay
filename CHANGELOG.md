@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.117] - 2026-11-05
+
+**Production readiness for the MCP endpoint: one auth rule, a real diagnostic,
+and a tool surface that cannot drift.**
+
+### Fixed
+- **GET /mcp required no token (R-11).** The legacy SSE transport answered
+  `200` with an `endpoint` event while `POST /mcp` demanded
+  `Authorization: Bearer`. Same data, one door open. Both now go through a
+  single `authRequirementFor()` policy and return `401` without the token.
+  Auth is also checked *before* the consent prompt, so an unauthenticated
+  caller gets `401` instead of a misleading `403 consent_required`.
+- **Token rotation did not take effect until restart.** `AuthManager` cached
+  the token in a `by lazy` property; `regenerateToken()` wrote prefs while
+  `validate()` kept comparing the old value. Rotation now mutates one
+  `TokenRotationState` and is effective on the next request, with a
+  persisted rotation counter.
+- **Tool surface drift.** `get_screen_state` outlived its removal from
+  `tools/list` and still answered, while the README advertised `tap` (never
+  implemented) and only 17 of the 28 live tools. Dispatch now goes through
+  one `HANDLED_TOOL_NAMES` gate, `get_screen_state` is declared a compat
+  alias, `tap` is gone from the docs, and `ToolRegistryContractTest` fails
+  the build if `tools/list`, the dispatch table and the README ever disagree.
+- Unknown tool / unknown method now return the JSON-RPC 2.0 codes
+  (`-32601`) and a hint to call `tools/list`, instead of `-1` and bare prose.
+
+### Added
+- **`GET /mcp/status`** — public diagnostic that answers "why is my client
+  failing?" in one call: `causes[]` (`server_stopped`,
+  `accessibility_not_running`, `token_not_provided`,
+  `token_mismatch_or_rotated`, `rate_limited`), uptime, port, accessibility,
+  rate-limit budget, approved-client count, tunnel state, and a **token
+  fingerprint** (sha-256, first 12 hex) so a client can tell a rotated token
+  apart from a rate limit without anyone reading the device. It never
+  returns the token.
+- `GET /health` now reports `version` and points at `/mcp/status`.
+- Tool-level JVM tests that bind the response contract: `ParseElementIdWiringTest`,
+  `TakeScreenshotToolTest`, `ServerDiagnosticsTest`, `ToolRegistryContractTest`.
+
 ## [1.0.116] - 2026-10-30
 
 **Tree completeness — the accessibility tree must give ALL the info (vision-free operation).**

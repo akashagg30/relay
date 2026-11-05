@@ -69,11 +69,11 @@ class McpHandler(internal val context: Context) {
                 "initialize" -> handleInitialize(id, params)
                 "tools/list" -> handleToolsList(id)
                 "tools/call" -> handleToolsCall(id, params)
-                else -> errorResponse(id, "Method not found: $method")
+                else -> errorResponse(id, "Method not found: $method", RPC_METHOD_NOT_FOUND)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Request parse error", e)
-            errorResponse("", "Parse error: ${e.message}")
+            errorResponse("", "Parse error: ${e.message}", RPC_PARSE_ERROR)
         }
     }
 
@@ -103,6 +103,15 @@ class McpHandler(internal val context: Context) {
         val args = params.optJSONObject("arguments") ?: JSONObject()
 
         Log.d(TAG, "Tool call: $toolName args=${args.toString().take(200)}")
+
+        // Single dispatch gate: a tool is either in HANDLED_TOOL_NAMES (and
+        // therefore callable AND advertised, or explicitly a compat alias) or
+        // it is rejected once, with an actionable message. This is what stops
+        // a tool from silently surviving after it was removed from tools/list.
+        if (toolName !in HANDLED_TOOL_NAMES) {
+            auditLogger.log(toolName, false, "unknown_tool", 0, "Unknown tool: $toolName")
+            return unknownToolResponse(id, toolName)
+        }
 
         // App access policy gate. Single choke point for every gated tool.
         // back / home / current_app are intentionally not gated so the agent can
@@ -146,11 +155,24 @@ class McpHandler(internal val context: Context) {
             "screenshot_with_overlay" -> screenshotWithOverlay(id)
             "get_app_policy" -> getAppPolicy(id)
             "act_toward_goal" -> actTowardGoal(id, args)
-            else -> errorResponse(id, "Unknown tool: $toolName")
+            else -> unknownToolResponse(id, toolName)
         }
     }
 
+    // --- Tool name surface ---
+
+    private fun unknownToolResponse(id: String, toolName: String): String {
+        val message = if (toolName.isBlank()) {
+            "missing tool name; call tools/list for the current tool set"
+        } else {
+            "Unknown tool: $toolName. Call tools/list for the current tool set."
+        }
+        return toolErrorResponse(id, message)
+    }
+
     // --- JSON-RPC response framing ---
+    // Device-free builders live in ToolHelpers.kt so JVM tests can pin the
+    // wire contract; these methods keep the call sites in the tool files terse.
 
     internal fun successResponse(id: String, result: JSONObject): String {
         return JSONObject().apply {
@@ -160,49 +182,17 @@ class McpHandler(internal val context: Context) {
         }.toString()
     }
 
-    internal fun toolSuccessResponse(id: String, textContent: String): String {
-        val result = JSONObject().apply {
-            put("content", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "text")
-                    put("text", textContent)
-                })
-            })
-        }
-        return JSONObject().apply {
-            put("jsonrpc", "2.0")
-            put("id", id)
-            put("result", result)
-        }.toString()
-    }
+    internal fun toolSuccessResponse(id: String, textContent: String): String =
+        toolSuccessJson(id, textContent)
 
-    internal fun toolErrorResponse(id: String, message: String): String {
-        val result = JSONObject().apply {
-            put("content", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "text")
-                    put("text", message)
-                })
-            })
-            put("isError", true)
-        }
-        return JSONObject().apply {
-            put("jsonrpc", "2.0")
-            put("id", id)
-            put("result", result)
-        }.toString()
-    }
+    internal fun toolErrorResponse(id: String, message: String): String =
+        toolErrorJson(id, message)
 
-    internal fun errorResponse(id: String, message: String): String {
-        return JSONObject().apply {
-            put("jsonrpc", "2.0")
-            put("id", id)
-            put("error", JSONObject().apply {
-                put("code", -1)
-                put("message", message)
-            })
-        }.toString()
-    }
+    internal fun errorResponse(
+        id: String,
+        message: String,
+        code: Int = RPC_METHOD_NOT_FOUND
+    ): String = protocolErrorJson(id, code, message)
 
     internal fun getAuditLog(id: String, args: JSONObject): String {
         val limit = args.optInt("limit", 20).coerceIn(1, 100)
@@ -277,4 +267,47 @@ class McpHandler(internal val context: Context) {
         }
     }
 }
+
+/**
+ * Every name [McpHandler] actually dispatches. `tools/list` is the advertised
+ * contract; this set is the implemented one. A tool that is removed from the
+ * advertised surface but left here becomes a silent compat alias — which is
+ * exactly how `get_session` outlived its removal — so [COMPAT_ALIAS_TOOL_NAMES]
+ * has to name it explicitly and ToolRegistryContractTest keeps all three in
+ * lockstep.
+ */
+internal val HANDLED_TOOL_NAMES: Set<String> = setOf(
+    "get_screen_state", // compat alias only; NOT advertised (see COMPAT_ALIAS_TOOL_NAMES)
+    "observe",
+    "click_node",
+    "swipe",
+    "input_text",
+    "press_key",
+    "submit",
+    "back",
+    "home",
+    "launch_app",
+    "wait",
+    "list_apps",
+    "search_apps",
+    "open_app",
+    "current_app",
+    "find",
+    "scroll_until",
+    "diag_sealed",
+    "get_audit_log",
+    "get_audit_summary",
+    "set_log_sync",
+    "get_log_sync",
+    "set_sync_endpoint",
+    "get_logs",
+    "share_logs",
+    "take_screenshot",
+    "screenshot_with_overlay",
+    "get_app_policy",
+    "act_toward_goal",
+)
+
+/** Tools that stay callable for old clients but are NOT advertised in tools/list. */
+internal val COMPAT_ALIAS_TOOL_NAMES: Set<String> = setOf("get_screen_state")
 

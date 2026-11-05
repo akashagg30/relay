@@ -12,6 +12,7 @@ import android.graphics.Path
 import android.util.Log
 import android.util.DisplayMetrics
 import com.agent.accessibility.service.AgentAccessibilityService
+import org.json.JSONArray
 import org.json.JSONObject
 
 // ── Shared constants ──────────────────────────────────────────────────────────
@@ -54,17 +55,97 @@ internal fun parseElementId(
     id: String,
     handler: McpHandler
 ): Pair<ElementId?, String?> {
-    val raw = parseElementIdRaw(args)
-    Log.d(TAG, "parseElementId: raw='$raw' keys=${args.keys().asSequence().toList()}")
-    if (raw == null) {
-        return null to handler.toolErrorResponse(id, ELEMENT_ID_MISSING_MESSAGE)
+    return when (val resolution = resolveElementId(args)) {
+        is ElementIdResolution.Resolved -> resolution.elementId to null
+        is ElementIdResolution.Rejected -> null to handler.toolErrorResponse(id, resolution.message)
     }
-    val decoded = ElementId.decode(raw)
-    if (decoded == null) {
-        return null to handler.toolErrorResponse(id, "invalid_element_id: \"$raw\" is not a valid element id")
-    }
-    return decoded to null
 }
+
+/**
+ * Device-free resolution half of [parseElementId]: pure input in, resolved
+ * id or the exact operator-facing rejection message out. This is the seam
+ * tool-level JVM tests drive, so the wiring (canonical key + legacy aliases
+ * + identical error text on every tool) is pinned without an Android Context.
+ */
+internal sealed class ElementIdResolution {
+    data class Resolved(val elementId: ElementId) : ElementIdResolution()
+    data class Rejected(val message: String) : ElementIdResolution()
+}
+
+internal fun resolveElementId(args: JSONObject): ElementIdResolution {
+    val raw = parseElementIdRaw(args)
+        ?: return ElementIdResolution.Rejected(ELEMENT_ID_MISSING_MESSAGE)
+    val decoded = ElementId.decode(raw)
+        ?: return ElementIdResolution.Rejected("invalid_element_id: \"$raw\" is not a valid element id")
+    return ElementIdResolution.Resolved(decoded)
+}
+
+// ── Tool response framing (pure: no Android types) ───────────────────────────
+//
+// Every tool returns through these three builders, so tests can pin the
+// JSON-RPC wire contract once instead of per tool. [McpHandler] delegates
+// here; nothing in this section touches Android.
+
+/** `result.content[0].text` = the tool payload, no error flag. */
+internal fun toolSuccessJson(id: String, textContent: String): String {
+    return JSONObject().apply {
+        put("jsonrpc", "2.0")
+        put("id", id)
+        put(
+            "result",
+            JSONObject().apply {
+                put(
+                    "content",
+                    JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("type", "text")
+                            put("text", textContent)
+                        })
+                    }
+                )
+            }
+        )
+    }.toString()
+}
+
+/** Tool-level failure: same envelope plus `isError=true`. */
+internal fun toolErrorJson(id: String, message: String): String {
+    return JSONObject().apply {
+        put("jsonrpc", "2.0")
+        put("id", id)
+        put(
+            "result",
+            JSONObject().apply {
+                put(
+                    "content",
+                    JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("type", "text")
+                            put("text", message)
+                        })
+                    }
+                )
+                put("isError", true)
+            }
+        )
+    }.toString()
+}
+
+/** Protocol-level error object (JSON-RPC 2.0 codes: -32700, -32601, ...). */
+internal fun protocolErrorJson(id: String, code: Int, message: String): String {
+    return JSONObject().apply {
+        put("jsonrpc", "2.0")
+        put("id", id)
+        put("error", JSONObject().apply {
+            put("code", code)
+            put("message", message)
+        })
+    }.toString()
+}
+
+internal const val RPC_METHOD_NOT_FOUND = -32601
+internal const val RPC_PARSE_ERROR = -32700
+
 
 /**
  * Perform a scroll gesture in the given direction.

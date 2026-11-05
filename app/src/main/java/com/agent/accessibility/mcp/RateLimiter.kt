@@ -61,6 +61,18 @@ class RateLimiter(private val requestsPerSecond: Int = 30) {
         return requestCounts[clientIp]?.count ?: 0
     }
 
+    /** Configured per-client budget, surfaced by /mcp/status. */
+    val limitPerSecond: Int
+        get() = requestsPerSecond
+
+    /** Clients currently sitting at the limit, i.e. right now getting 429s. */
+    fun blockedClientCount(): Int {
+        val windowStart = System.currentTimeMillis() - 1000
+        return requestCounts.values.count { window ->
+            window.windowStart >= windowStart && window.count >= requestsPerSecond
+        }
+    }
+
     fun clear() {
         requestCounts.clear()
     }

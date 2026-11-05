@@ -18,12 +18,12 @@ Relay is an MCP server that lets AI agents explore, interact with, and test Andr
 
 ## Why Relay?
 
-Relay is **built specifically for testing**, not general-purpose remote control. While other MCP servers offer 50+ tools for controlling any app, Relay focuses on 17 essential tools optimized for QA workflows.
+Relay is **built specifically for testing**, not general-purpose remote control. While other MCP servers offer 50+ tools for controlling any app, Relay focuses on 28 tools optimized for QA workflows.
 
 **Key differentiators:**
 - **Testing-first design** — Every tool is designed for QA use cases
 - **Semantic understanding** — `observe()` tool provides higher-level scene analysis for smarter test automation
-- **Simpler onboarding** — Fewer tools = easier to learn and integrate
+- **A documented contract** — the 28-tool surface is the same list in `tools/list`, the README and the dispatch table (enforced by `ToolRegistryContractTest`)
 - **CI/CD ready** — Built for automated testing pipelines
 
 If you need general-purpose phone control, there are other options. If you need **reliable, AI-powered testing**, Relay is built for you.
@@ -97,15 +97,19 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## Authentication
 
-- A random 32-byte token is generated on first launch
-- Stored in app SharedPreferences
-- Displayed in the debug UI — tap **COPY TOKEN**
-- Required for all MCP requests via `Authorization: Bearer <token>`
+- A random 128-bit token (32 hex characters) is generated on first launch
+- Stored in app SharedPreferences, displayed in the debug UI — tap **COPY TOKEN**
+- Required on **every** `/mcp` request, `GET` included: `Authorization: Bearer <token>`
+  (a GET without the token returns `401`, exactly like POST — it is the same data)
+- Rotating the token in the app takes effect on the next request; `/mcp/status`
+  shows the rotation counter and a token fingerprint so a client can tell
+  "my token is old" apart from "I am rate limited"
 
 ## MCP Endpoint
 
 ```
-POST http://<PHONE_IP>:8765/mcp
+POST http://<PHONE_IP>:8765/mcp   # JSON-RPC (SSE when Accept: text/event-stream)
+GET  http://<PHONE_IP>:8765/mcp   # legacy HTTP+SSE transport — token required
 ```
 
 ## Health Check
@@ -118,22 +122,67 @@ Response:
 ```json
 {
   "status": "ok",
+  "version": "1.0.117",
   "accessibility": true,
+  "accessibilityRunning": true,
   "foregroundPackage": "com.android.settings",
   "mcpServer": true,
-  "port": 8765
+  "port": 8765,
+  "statusEndpoint": "/mcp/status"
 }
 ```
 
+## Status / Diagnosis
+
+`GET /mcp/status` is public on purpose: when a client cannot authenticate it
+still needs to know **why**. It never returns the token — only a sha-256
+fingerprint (first 12 hex) that a client can compare against its own copy.
+
+```bash
+curl http://<PHONE_IP>:8765/mcp/status
+```
+
+```json
+{
+  "status": "degraded",
+  "version": "1.0.117",
+  "protocolVersion": "2025-06-18",
+  "uptimeSec": 4210,
+  "server": { "running": true, "port": 8765 },
+  "accessibility": { "enabled": true, "running": true },
+  "auth": {
+    "required": true,
+    "tokenProvided": true,
+    "authenticated": false,
+    "tokenFingerprint": "3f9c1a0b7d22",
+    "rotationCount": 1,
+    "lastRotatedAt": 1761000000000
+  },
+  "rateLimit": { "requestsPerSecond": 30, "blockedClients": 0 },
+  "clients": { "approved": 2 },
+  "session": { "mode": "stateless", "lock": "none" },
+  "tunnel": { "running": false, "url": null },
+  "causes": ["token_mismatch_or_rotated"],
+  "hint": "hash the token you hold and compare with auth.tokenFingerprint; a different value means the phone rotated it (rotationCount=1) — re-read it from the Relay app"
+}
+```
+
+`causes` is the part to branch on: `server_stopped`, `accessibility_not_running`,
+`token_not_provided`, `token_mismatch_or_rotated`, `rate_limited`. There is no
+server-side session to be stuck on — every request authenticates on its own.
+
 ## Available MCP Tools
+
+`tools/list` advertises exactly 28 tools. This table is the same list — if the
+two ever diverge, `ToolRegistryContractTest` fails the build.
 
 | Tool | Input | Description |
 |------|-------|-------------|
-| `get_screen_state` | — | Returns current foreground app accessibility tree as JSON |
 | `click_node` | `id` | Clicks a node (walks up to clickable ancestor if needed). Legacy aliases `elementId`/`nodeId` also accepted |
-| `tap` | `x`, `y` | Taps at screen coordinates |
 | `swipe` | `startX`, `startY`, `endX`, `endY`, `durationMs` | Swipes between two points |
 | `input_text` | `id`, `text` | Types text into an editable node. Legacy aliases `elementId`/`nodeId` also accepted for the id |
+| `press_key` | `key` | Presses a key (`enter`, `back`, `home`, `tab`, ...) |
+| `submit` | — | Submits the focused field via the IME action, then a submit button, then the input's trailing edge |
 | `back` | — | Performs GLOBAL_ACTION_BACK |
 | `home` | — | Performs GLOBAL_ACTION_HOME |
 | `launch_app` | `packageName` | Launches an app by package name |
@@ -142,11 +191,32 @@ Response:
 | `search_apps` | `query` | Searches installed applications by name |
 | `open_app` | `name` | Opens an installed application by human-readable name (returns `ambiguous_app` instead of guessing) |
 | `current_app` | — | Returns the currently foreground application |
+| `take_screenshot` | — | Base64 PNG of the current screen; two bounded attempts, typed `screenshot_failed` envelope on failure |
+| `screenshot_with_overlay` | — | Screenshot with element bounding boxes and ids drawn on top |
+| `get_app_policy` | — | Read-only view of the user's app access policy (`protected` / `alwaysBlocked` are unreadable and unactionable) |
+| `get_audit_log` | `limit` | Recent tool calls with success/failure, method and timing |
+| `get_audit_summary` | — | Aggregate success rate and average timing per tool |
+| `get_logs` | `limit` | Recent local log entries |
+| `share_logs` | — | Opens the Android share sheet with the log file |
+| `set_log_sync` | `enabled` | Opt in/out of cloud log sync |
+| `get_log_sync` | — | Current sync state and endpoint |
+| `set_sync_endpoint` | `url` | Sets the cloud sync endpoint |
 | `observe` | — | Returns a semantic representation of the current screen (roles, ids, pixel bounds, `viewId`). Top-level keys are always `app`, `screenTitle`, `scrollable`, `screenHash`, `elements`, `screenState`. One optional key, `treeIncomplete`, appears **only** when the tree could not represent something (a node with no usable rect, or an actionable node with no text/description/viewId) — so a gap is never silent. `screenTitle` is `"Unknown"` when no title candidate (TextView/Toolbar/ActionBar) was found within depth 10 of the window root; normal for full-screen apps/games |
 | `find` | `text`, `role` | Searches the last `observe()` result for a matching element. Matches text, contentDescription, value, placeholder, `viewId` and element id across every retained element, nested ones included; exact title matches rank first. Returns `found`, `count`, `matches[]` (id/role/title/viewId/bounds, up to 10) and the best `element` |
 | `scroll_until` | `text`, `direction`, `maxScrolls` | Scrolls until an element with matching text is visible |
 | `diag_sealed` | `elementId` | Diagnostic: tests node sealed lifecycle (development aid) |
 | `act_toward_goal` | `goal`, `maxSteps`, `confidenceThreshold`, `pauseBeforeKeywords` | Bounded on-device perceive-decide-act loop; returns one of `done\|escalate\|paused\|stuck\|blocked\|max_steps` (`escalate` includes fresh element IDs ready for immediate use) |
+
+### Legacy compatibility
+
+`get_screen_state` is the pre-`observe` tool. It is **not** advertised in
+`tools/list` anymore, but it still answers for old clients; it is declared in
+`COMPAT_ALIAS_TOOL_NAMES` so it can never drift back into the advertised
+surface unnoticed. New code should call `observe`.
+
+`tap` (raw x/y tap) is not part of the server surface; use `click_node` with an
+element id, which resolves against the live tree instead of tapping pixels that
+may have moved.
 
 ## Example MCP Request
 
@@ -168,13 +238,13 @@ curl -X POST http://<PHONE_IP>:8765/mcp \
   -d '{"jsonrpc":"2.0","id":"2","method":"tools/list","params":{}}'
 ```
 
-### Get Screen State
+### Observe The Screen
 
 ```bash
 curl -X POST http://<PHONE_IP>:8765/mcp \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <TOKEN>" \
-  -d '{"jsonrpc":"2.0","id":"3","method":"tools/call","params":{"name":"get_screen_state","arguments":{}}}'
+  -H "Authorization: Bearer ***" \
+  -d '{"jsonrpc":"2.0","id":"3","method":"tools/call","params":{"name":"observe","arguments":{}}}'
 ```
 
 ### Click a Node
@@ -205,12 +275,12 @@ For Claude Desktop or similar MCP clients, add to your config:
 
 ## Node Resolution
 
-Node IDs are stable within a single `get_screen_state` response. Between calls:
+Node IDs are stable within a single `observe` response. Between calls:
 
-1. `get_screen_state` captures the tree and stores node descriptors (viewId, text, class, bounds)
+1. `observe` captures the tree and stores node descriptors (viewId, text, class, bounds)
 2. `click_node(id)` resolves the descriptor against the **current** `rootInActiveWindow`
 3. If the screen changed and the node can't be matched → returns `stale_node` error
-4. The agent should call `get_screen_state` again to get fresh IDs
+4. The agent should call `observe` again to get fresh IDs
 
 ## Network Setup
 
@@ -244,6 +314,8 @@ app/src/main/java/com/agent/accessibility/
 │   ├── McpServerService.kt     # Foreground service + HTTP server
 │   ├── NodeResolver.kt         # Stale node resolution
 │   ├── RateLimiter.kt          # Per-request rate limiting
+│   ├── ServerDiagnostics.kt    # /mcp/status document + one auth policy for all routes
+│   ├── AuthManager.kt          # Token generation, rotation & validation
 │   ├── SemanticProjector.kt    # Projects UI tree to semantic scene
 │   ├── SemanticScene.kt        # Semantic scene data model
 │   ├── ToolRegistry.kt         # MCP tool definitions / schemas (tools/list)
